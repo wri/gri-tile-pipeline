@@ -1,1 +1,1 @@
-# gri-tile-pipeline
+# GRI Tile Pipeline
