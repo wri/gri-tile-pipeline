@@ -1,0 +1,18 @@
+lithops:
+  backend: aws_lambda
+  storage: aws_s3
+  log_level: INFO
+aws:
+  region: us-west-2
+aws_lambda:
+  execution_role: arn:aws:iam::<ACCOUNT_ID>:role/lambdaLithopsExecutionRole
+  region: us-west-2
+  runtime: <CONFIRM_ECR_ID>.dkr.ecr.us-west-2.amazonaws.com/lithops-light:py311
+  runtime_memory: 1024
+  runtime_timeout: 300
+  ephemeral_storage: 1024
+  architecture: x86_64
+  namespace: ttc-dev
+aws_s3:
+  region: us-west-2
+  storage_bucket: dev-ttc-lithops-usw2
