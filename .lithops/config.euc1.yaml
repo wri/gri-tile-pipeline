@@ -3,16 +3,14 @@ lithops:
   storage: aws_s3
   log_level: INFO
 aws:
-  region: eu-central-1
+  region: "eu-central-1"
 aws_lambda:
-  execution_role: arn:aws:iam::<ACCOUNT_ID>:role/lambdaLithopsExecutionRole
+  execution_role: "arn:aws:iam::905418285725:role/lambdaLithopsExecutionRole"
   region: eu-central-1
-  runtime: <CONFIRM_ECR_ID>.dkr.ecr.eu-central-1.amazonaws.com/lithops-light:py311
-  runtime_memory: 1024
-  runtime_timeout: 300
-  ephemeral_storage: 1024
+  runtime: 905418285725.dkr.ecr.eu-central-1.amazonaws.com/lithops_v361_4we5_ttc-dev/ttc-loaders-dev:latest
   architecture: x86_64
   namespace: ttc-dev
+  max_workers: 300
 aws_s3:
-  region: eu-central-1
+  region: "eu-central-1"
   storage_bucket: dev-ttc-lithops-euc1
