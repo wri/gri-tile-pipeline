@@ -1,13 +1,20 @@
 """
-A simple script to visualize the difference between two TIFF files.
+A simple script to visualize the difference between two 2D arrays.
 
-This script loads two single-band TIFF images, calculates their per-pixel
-difference, and displays the two original images and the resulting difference
-map side-by-side using matplotlib.
+Supports inputs as:
+- GeoTIFF: .tif/.tiff (reads band 1)
+- NumPy: .npy
+- Hickle: .hkl/.hlk (expects a NumPy array saved via hickle)
 
-It assumes the two input TIFFs are perfectly aligned and have the same
-dimensions, will crop if they don't but interpretability of results will be meh. 
-Geospatial information is ignored.
+This script loads two inputs, ensures they are 2D arrays (you can specify a
+slice to reduce higher-dimensional arrays; otherwise we select the first
+band/slice heuristically), calculates their per-pixel difference,
+and displays the two originals and the resulting difference map side-by-side
+using matplotlib.
+
+It assumes the two inputs are perfectly aligned and have the same dimensions,
+will crop if they don't but interpretability of results will be meh. Geospatial
+information is ignored.
 """
 import argparse
 import os
@@ -15,8 +22,98 @@ import numpy as np
 import rasterio
 import matplotlib.pyplot as plt
 
-def diff_visualizer(file1_path, file2_path):
-    """Loads two TIFFs, computes their difference, and visualizes the result."""
+def _to_2d_array(arr):
+    """Ensure a 2D array. If 3D, pick the first band/slice heuristically."""
+    if not isinstance(arr, np.ndarray):
+        try:
+            arr = np.array(arr)
+        except Exception:
+            return None
+
+    if arr.ndim == 2:
+        return arr
+
+    if arr.ndim == 3:
+        # Heuristics: treat shape as (bands, rows, cols) if first dim is small
+        if arr.shape[0] <= 12 and arr.shape[1] >= 32 and arr.shape[2] >= 32:
+            return arr[0]
+        # Or (rows, cols, bands)
+        if arr.shape[2] <= 12 and arr.shape[0] >= 32 and arr.shape[1] >= 32:
+            return arr[:, :, 0]
+        # Fallback: first slice on axis 0
+        return arr[0]
+
+    # If 1D or other shapes, cannot visualize as image
+    return None
+
+def _parse_slice_spec(slice_spec_str, ndim):
+    """Parse a Python-like slice spec string (e.g., "0,:,:,0") to a tuple usable in numpy indexing.
+
+    Rules:
+    - Comma-separated tokens for each dimension.
+    - Token can be an integer (e.g., "0") or ":" meaning full slice.
+    - Fewer tokens than ndim: remaining dims get ":".
+    - More tokens than ndim: ignored extras.
+    """
+    if slice_spec_str is None:
+        return None
+
+    tokens = [t.strip() for t in str(slice_spec_str).split(',')]
+    index_elems = []
+    for i in range(min(len(tokens), ndim)):
+        tok = tokens[i]
+        if tok == ':' or tok == '':
+            index_elems.append(slice(None))
+        else:
+            try:
+                index_elems.append(int(tok))
+            except ValueError:
+                # unsupported token, fallback to full slice
+                index_elems.append(slice(None))
+    # pad with full slices if needed
+    while len(index_elems) < ndim:
+        index_elems.append(slice(None))
+    return tuple(index_elems)
+
+def _apply_slice(arr, slice_spec_str):
+    if slice_spec_str is None:
+        return arr
+    spec = _parse_slice_spec(slice_spec_str, arr.ndim)
+    try:
+        sliced = arr[spec]
+    except Exception:
+        return arr
+    return np.squeeze(sliced)
+
+def load_array_from_path(path):
+    """Load a NumPy array from .tif/.tiff, .npy, or .hkl/.hlk files.
+
+    - .tif/.tiff: reads band 1 (2D). For multi-band slicing, use formats that load full arrays.
+    - .npy/.hkl/.hlk: returns the raw array (can be 2D/3D/4D).
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext in {'.tif', '.tiff'}:
+        with rasterio.open(path) as src:
+            arr = src.read(1)
+        return arr
+    if ext in {'.npy'}:
+        arr = np.load(path, allow_pickle=False)
+        return arr
+    if ext in {'.hkl', '.hlk', '.hickle'}:
+        try:
+            import hickle as hkl
+        except Exception as e:
+            print("Error: hickle is required to read .hkl/.hlk files. Install with 'pip install hickle'.")
+            print(f"Import error: {e}")
+            return None
+        arr = hkl.load(path)
+        return arr
+
+    print(f"Error: Unsupported file extension '{ext}'. Supported: .tif/.tiff, .npy, .hkl/.hlk")
+    return None
+
+def diff_visualizer(file1_path, file2_path, slice_spec=None):
+    """Loads two arrays, computes their difference, and visualizes the result."""
 
     # --- 1. Validate and Load Input Files ---
     for f in [file1_path, file2_path]:
@@ -25,12 +122,22 @@ def diff_visualizer(file1_path, file2_path):
             return
 
     try:
-        with rasterio.open(file1_path) as src1:
-            img1 = src1.read(1)
-        with rasterio.open(file2_path) as src2:
-            img2 = src2.read(1)
+        img1 = load_array_from_path(file1_path)
+        img2 = load_array_from_path(file2_path)
     except Exception as e:
-        print(f"Error reading TIFF files: {e}")
+        print(f"Error reading input files: {e}")
+        return
+
+    # Optionally apply user-provided slicing, then coerce to 2D
+    if img1 is not None:
+        img1 = _apply_slice(img1, slice_spec)
+        img1 = _to_2d_array(img1)
+    if img2 is not None:
+        img2 = _apply_slice(img2, slice_spec)
+        img2 = _to_2d_array(img2)
+
+    if img1 is None or img2 is None:
+        print("Error: Failed to load one or both inputs as 2D arrays.")
         return
 
     # --- 2. Handle Different Dimensions ---
@@ -38,7 +145,7 @@ def diff_visualizer(file1_path, file2_path):
     original_shape2 = img2.shape
     
     if img1.shape != img2.shape:
-        print(f"Warning: Input images have different dimensions.")
+        print("Warning: Input images have different dimensions.")
         print(f"  {os.path.basename(file1_path)}: {original_shape1}")
         print(f"  {os.path.basename(file2_path)}: {original_shape2}")
         print("  Cropping both images to the smaller dimensions and aligning to top-left corner.")
@@ -72,30 +179,46 @@ def diff_visualizer(file1_path, file2_path):
 
     # Define a consistent colormap and range for the reference images
     cmap_ref = 'viridis'
-    vmin_ref = 0
-    vmax_ref = 100
+    # Robust min/max across both images (2nd-98th percentiles), fallback to min/max
+    combined = np.concatenate([img1.astype(np.float32).ravel(), img2.astype(np.float32).ravel()])
+    combined = combined[~np.isnan(combined)]
+    if combined.size > 0:
+        try:
+            vmin_ref = float(np.percentile(combined, 2))
+            vmax_ref = float(np.percentile(combined, 98))
+        except Exception:
+            vmin_ref = float(np.nanmin(combined))
+            vmax_ref = float(np.nanmax(combined))
+    else:
+        vmin_ref, vmax_ref = 0.0, 100.0
+    if not np.isfinite(vmin_ref) or not np.isfinite(vmax_ref) or vmin_ref == vmax_ref:
+        vmin_ref, vmax_ref = 0.0, 100.0
 
     # Display Image 1
     im1 = ax1.imshow(img1, cmap=cmap_ref, vmin=vmin_ref, vmax=vmax_ref)
     title1 = os.path.basename(file1_path)
     if original_shape1 != img1.shape:
         title1 += f"\n(Original: {original_shape1}, Cropped: {img1.shape})"
+    if slice_spec:
+        title1 += f"\nSlice: {slice_spec}"
     ax1.set_title(title1)
     ax1.set_xlabel('Width')
     ax1.set_ylabel('Height')
     cbar1 = fig.colorbar(im1, ax=ax1, orientation='horizontal', pad=0.1)
-    cbar1.set_label("Pixel Value (0-100)")
+    cbar1.set_label("Pixel Value")
 
     # Display Image 2
     im2 = ax2.imshow(img2, cmap=cmap_ref, vmin=vmin_ref, vmax=vmax_ref)
     title2 = os.path.basename(file2_path)
     if original_shape2 != img2.shape:
         title2 += f"\n(Original: {original_shape2}, Cropped: {img2.shape})"
+    if slice_spec:
+        title2 += f"\nSlice: {slice_spec}"
     ax2.set_title(title2)
     ax2.set_xlabel('Width')
     ax2.set_yticklabels([]) # Hide y-axis labels to avoid clutter
     cbar2 = fig.colorbar(im2, ax=ax2, orientation='horizontal', pad=0.1)
-    cbar2.set_label("Pixel Value (0-100)")
+    cbar2.set_label("Pixel Value")
 
     # Display Difference
     # Use a diverging colormap to highlight positive and negative differences
@@ -146,7 +269,7 @@ def diff_visualizer(file1_path, file2_path):
              bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     ax4.legend()
 
-    fig.suptitle('TIFF Difference Visualization', fontsize=16)
+    fig.suptitle('Array Difference Visualization', fontsize=16)
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     
     print("Displaying plot... Close the plot window to exit.")
@@ -155,18 +278,28 @@ def diff_visualizer(file1_path, file2_path):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description="Visualize the difference between two single-band TIFF files."
+        description="Visualize the difference between two arrays (.tif/.tiff, .npy, .hkl/.hlk)."
     )
     parser.add_argument(
         'file1',
         type=str,
-        help="Path to the first input TIFF file."
+        help="Path to the first input file (.tif/.tiff, .npy, .hkl/.hlk)."
     )
     parser.add_argument(
         'file2',
         type=str,
-        help="Path to the second input TIFF file."
+        help="Path to the second input file (.tif/.tiff, .npy, .hkl/.hlk)."
+    )
+    parser.add_argument(
+        '--slice',
+        dest='slice_spec',
+        type=str,
+        default=None,
+        help=(
+            "Optional Python-like slice spec applied to both inputs before visualization. "
+            "Example for 4D (T,H,W,C): '0,:,:,0' selects T=0 and C=0."
+        )
     )
     args = parser.parse_args()
     
-    diff_visualizer(args.file1, args.file2) 
+    diff_visualizer(args.file1, args.file2, slice_spec=args.slice_spec) 
