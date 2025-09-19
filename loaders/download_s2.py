@@ -15,11 +15,10 @@ import sys
 import time
 import tempfile
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Optional, Union
+from typing import List, Tuple, Dict, Optional, Union, Any
 from pathlib import Path
 
 import numpy as np
-import xarray as xr
 import click
 from loguru import logger
 import hickle as hkl
@@ -31,7 +30,7 @@ from obstore.store import S3Store, LocalStore, from_url
 import boto3
 from pystac_client import Client
 from odc.stac import load as stac_load, configure_rio
-from shapely.geometry import box as shapely_box
+from shapely.geometry import shape as shapely_shape
 
 # ----------------------------
 # Configuration
@@ -51,6 +50,13 @@ CLOUD_FINAL_MAX = 0.40      # Final threshold after local weighting
 
 # SCL cloudy values - matching reference script
 SCL_CLOUDY = {0, 1, 2, 3, 7, 8, 9, 10, 11}  # All problematic pixels
+
+# Coverage requirements for quality evaluation
+MIN_COVERAGE_FRAC = 0.95  # require at least 95% bbox coverage per day/group
+
+# Selection caps
+MAX_SCENES_TOTAL = 24
+MAX_SCENES_PER_MONTH = 2
 
 # ----------------------------
 # Utilities
@@ -95,6 +101,27 @@ def bbox2geojson(bbox: list) -> dict:
         [bbox[0], bbox[1]]
     ]
     return {"type": "Polygon", "coordinates": [coords]}
+
+def compute_coverage_by_id(items: List, tile_bbox: list) -> Dict[str, float]:
+    """Compute coverage fraction of each item's footprint over the tile bbox.
+    Returns a mapping of item.id -> coverage in [0,1].
+    """
+    try:
+        tile_geom = bbox2geojson(tile_bbox)
+        tile_poly = shapely_shape(tile_geom)
+        tile_area = tile_poly.area if tile_poly.area > 0 else 1.0
+    except Exception:
+        # Fallback: no coverage filtering
+        return {getattr(it, 'id', f'idx{i}'): 1.0 for i, it in enumerate(items)}
+    cov: Dict[str, float] = {}
+    for it in items:
+        try:
+            item_poly = shapely_shape(getattr(it, 'geometry', {}))
+            inter_area = item_poly.intersection(tile_poly).area
+            cov[getattr(it, 'id', '')] = float(max(0.0, min(1.0, inter_area / tile_area)))
+        except Exception:
+            cov[getattr(it, 'id', '')] = 0.0
+    return cov
 
 def extract_dates_legacy(date_dict: list, year: int) -> List[int]:
     """
@@ -248,13 +275,15 @@ class SavePaths:
 # ----------------------------
 # Stage 1: Cloud Identification (replaces identify_clouds_big_bbx)
 # ----------------------------
-def identify_clouds_stac(items: List, bbox: list, year: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def identify_clouds_stac(items: List, bbox: list, year: int, log: Optional[Any] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Stage 1: Identify clean dates from cloud analysis.
     Replaces legacy identify_clouds_big_bbx function.
     
     Returns: (clouds_legacy, cloud_percent, clean_steps, local_clouds)
     """
+    if log is None:
+        log = logger
     if len(items) == 0:
         return (np.zeros((0,0,0), np.float32), np.array([]), np.array([]), np.array([]))
     
@@ -272,8 +301,8 @@ def identify_clouds_stac(items: List, bbox: list, year: int) -> Tuple[np.ndarray
         chunks={}
     )
     
-    logger.info(f"Loaded SCL for cloud analysis in {_elapsed_ms(t_load):.0f} ms")
-    logger.debug(f"SCL shape: {ds_scl.sizes}")
+    log.debug(f"Loaded SCL for cloud analysis in {_elapsed_ms(t_load):.0f} ms")
+    log.debug(f"SCL shape: {ds_scl.sizes}")
     
     # Extract arrays (robust across xarray versions)
     scl = _to_numpy(ds_scl["scl"])  # (T,H,W)
@@ -307,7 +336,7 @@ def identify_clouds_stac(items: List, bbox: list, year: int) -> Tuple[np.ndarray
     else:
         local_clouds = cloud_percent.copy()
     
-    logger.debug(f"Cloud stats - mean global: {np.mean(cloud_percent):.2f}, mean local: {np.mean(local_clouds):.2f}")
+    log.debug(f"Cloud stats - mean global: {np.mean(cloud_percent):.2f}, mean local: {np.mean(local_clouds):.2f}")
     
     # Filter very cloudy scenes (>50%)
     keep = cloud_percent <= CLOUD_HARD_DROP
@@ -341,37 +370,80 @@ def identify_clouds_stac(items: List, bbox: list, year: int) -> Tuple[np.ndarray
     
     keep_idx = np.array(final_indices, dtype=np.int64)
     
-    logger.info(f"Cloud filtering: {len(items)} → {len(keep_idx)} clean scenes")
-    
-    # Extract clean steps (julian days matching legacy format)
+    # Selection: prefer up to MAX_SCENES_PER_MONTH, cap at MAX_SCENES_TOTAL, favor lowest score
+    # Score uses the same weighted metric used for filtering
+    scores_all = weighted  # defined above; lower is better
     if len(keep_idx) > 0:
-        clean_dates = times[keep_idx]
+        kept_scores = scores_all[keep_idx]
+        kept_times = times[keep_idx]
+        # Build month keys YYYYMM
+        kept_months = np.array([int(str(t)[:7].replace('-', '')) for t in kept_times], dtype=np.int64)
+        # Indices within kept set
+        kept_order_idx = np.arange(len(keep_idx))
+        selected_within_kept: List[int] = []
+        # Per-month selection
+        for month in np.unique(kept_months):
+            month_mask = kept_months == month
+            month_idxs = kept_order_idx[month_mask]
+            # sort by score ascending
+            month_sorted = month_idxs[np.argsort(kept_scores[month_mask])]
+            selected_within_kept.extend(month_sorted[:MAX_SCENES_PER_MONTH].tolist())
+        # If too many, trim globally by best scores
+        if len(selected_within_kept) > MAX_SCENES_TOTAL:
+            sel_scores = kept_scores[selected_within_kept]
+            trim_order = np.argsort(sel_scores)[:MAX_SCENES_TOTAL]
+            selected_within_kept = [selected_within_kept[i] for i in trim_order]
+        # If fewer than cap, top-up with remaining best overall
+        if len(selected_within_kept) < MAX_SCENES_TOTAL:
+            remaining = [i for i in kept_order_idx.tolist() if i not in set(selected_within_kept)]
+            if remaining:
+                rem_scores = kept_scores[remaining]
+                need = MAX_SCENES_TOTAL - len(selected_within_kept)
+                add_order = np.argsort(rem_scores)[:need]
+                selected_within_kept.extend([remaining[i] for i in add_order])
+        # Preserve chronological order for output
+        sel_mask = np.zeros(len(keep_idx), dtype=bool)
+        sel_mask[selected_within_kept] = True
+        keep_idx_selected = keep_idx[sel_mask]
+        # Sort by time to keep chronological ordering
+        order_time = np.argsort(times[keep_idx_selected])
+        keep_idx_selected = keep_idx_selected[order_time]
+        # Recompute outputs based on selection
+        clean_dates = times[keep_idx_selected]
         clean_steps = np.array(extract_dates_legacy(clean_dates, year), dtype=np.int64)
+        # Subset stats arrays to selection for downstream logging
+        cloud_percent_sel = cloud_percent[keep_idx_selected]
+        local_clouds_sel = local_clouds[keep_idx_selected]
+        log.info(f"Cloud filtering: {len(items)} → {len(keep_idx)} clean → selected {len(keep_idx_selected)} scenes")
     else:
+        log.info(f"Cloud filtering: {len(items)} → 0 clean scenes")
         clean_steps = np.array([], dtype=np.int64)
+        cloud_percent_sel = np.array([])
+        local_clouds_sel = np.array([])
     
     # Prepare legacy cloud output (scaled to 255, with NaN for >100)
     clouds_legacy = cloud_frac * 255.0
     clouds_legacy = np.where(clouds_legacy > 100, np.nan, clouds_legacy).astype(np.float32)
     
-    return clouds_legacy, cloud_percent[keep_idx], clean_steps, local_clouds[keep_idx]
+    return clouds_legacy, cloud_percent_sel, clean_steps, local_clouds_sel
 
 # ----------------------------
 # Stage 2: Download Sentinel-2 (replaces download_sentinel_2_new)
 # ----------------------------
 def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
-                           year: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                           year: int, *, coverage_by_id: Optional[Dict[str, float]] = None, log: Optional[Any] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Stage 2: Download Sentinel-2 data for clean dates.
     Replaces legacy download_sentinel_2_new function.
     
     Returns: (img_10, img_20, dates_array, cirrus_mask)
     """
-    if len(items) == 0 or len(clean_steps) == 0:
-        return (np.zeros((0,0,0,4), np.uint16), 
-                np.zeros((0,0,0,6), np.uint16),
-                np.array([], np.int64),
-                np.zeros((0,0,0), np.float32))
+    if log is None:
+        log = logger
+    if len(items) == 0:
+        raise RuntimeError("Tile search returned 0 items for non-empty clean_steps")
+    if len(clean_steps) == 0:
+        raise RuntimeError("No clean steps provided to downloader")
     
     # Extract item dates and convert to julian days
     item_dates = []
@@ -387,22 +459,39 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
     filtered_items = []
     
     for step in clean_steps:
-        closest_idx = np.argmin(np.abs(item_julian - step))
-        time_diff = np.min(np.abs(item_julian - step))
-        
-        if time_diff < 3:
-            steps_to_download.append(closest_idx)
-            dates_to_download.append(item_julian[closest_idx])
-            filtered_items.append(items[closest_idx])
-        else:
-            logger.warning(f"Date/orbit mismatch for step {step}, closest is {time_diff} days away")
+        diffs = np.abs(item_julian - step)
+        closest_idx = int(np.argmin(diffs))
+        time_diff = int(np.min(diffs))
+        if time_diff >= 3:
+            log.debug(f"Date/orbit mismatch for step {step}, closest is {time_diff} days away")
+            continue
+        # Prefer high-coverage candidate if provided
+        candidate_indices = np.where(diffs == time_diff)[0]
+        chosen_idx = None
+        if coverage_by_id is not None and len(candidate_indices) > 0:
+            best_cov = -1.0
+            for idx in candidate_indices:
+                cov = float(coverage_by_id.get(getattr(items[idx], 'id', ''), 0.0))
+                if cov > best_cov:
+                    best_cov = cov
+                    chosen_idx = int(idx)
+            if best_cov < MIN_COVERAGE_FRAC:
+                # try any within +/-1 day
+                near_mask = diffs <= 1
+                near_indices = np.where(near_mask)[0]
+                for idx in near_indices:
+                    cov = float(coverage_by_id.get(getattr(items[idx], 'id', ''), 0.0))
+                    if cov >= MIN_COVERAGE_FRAC and cov > best_cov:
+                        best_cov = cov
+                        chosen_idx = int(idx)
+        if chosen_idx is None:
+            chosen_idx = closest_idx
+        steps_to_download.append(chosen_idx)
+        dates_to_download.append(item_julian[chosen_idx])
+        filtered_items.append(items[chosen_idx])
     
     if len(filtered_items) == 0:
-        logger.warning("No items matched clean_steps")
-        return (np.zeros((0,0,0,4), np.uint16),
-                np.zeros((0,0,0,6), np.uint16),
-                np.array([], np.int64),
-                np.zeros((0,0,0), np.float32))
+        raise RuntimeError("No items matched clean_steps after coverage/date selection")
     
     logger.info(f"Downloading {len(filtered_items)} scenes matching clean steps")
     
@@ -421,6 +510,12 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
     logger.debug(f"Loaded SCL for quality in {_elapsed_ms(t_scl):.0f} ms")
     
     scl_quality = _to_numpy(ds_scl["scl"])  # (T,h,w)
+    # Extra debug context for quality evaluation
+    try:
+        T_q, H_q, W_q = scl_quality.shape
+        logger.debug(f"Quality SCL shape: (T={T_q}, H={H_q}, W={W_q})")
+    except Exception:
+        pass
     
     # Calculate quality metric (matching legacy logic)
     bad_pixels = np.zeros_like(scl_quality, dtype=bool)
@@ -428,16 +523,53 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
         bad_pixels |= (scl_quality == code)
     
     quality_per_img = np.mean(bad_pixels, axis=(1, 2))
+    quality_threshold = 0.20
+    try:
+        logger.debug(
+            f"Quality threshold (bad_frac)={quality_threshold:.2f}; stats min={np.min(quality_per_img):.3f}, p50={np.median(quality_per_img):.3f}, max={np.max(quality_per_img):.3f}"
+        )
+    except Exception:
+        pass
+    
+    # Per-image breakdown of SCL bad classes (top contributors)
+    try:
+        unique_codes = np.unique(scl_quality)
+        code_fracs = {int(code): np.mean(scl_quality == code, axis=(1, 2)) for code in unique_codes}
+        for i, item in enumerate(filtered_items):
+            breakdown_bad = {int(code): float(code_fracs[int(code)][i]) for code in sorted(SCL_CLOUDY) if int(code) in code_fracs}
+            if breakdown_bad:
+                top = sorted(breakdown_bad.items(), key=lambda kv: kv[1], reverse=True)[:4]
+                breakdown_str = ", ".join([f"{k}:{v:.3f}" for k, v in top if v > 0]) or "none>0"
+            else:
+                breakdown_str = "none"
+            item_id = getattr(item, "id", "n/a")
+            item_dt = getattr(item, "datetime", None)
+            logger.debug(
+                f"Quality img {i}: id={item_id} date={item_dt} bad_frac={quality_per_img[i]:.3f} bad_breakdown={{{breakdown_str}}}"
+            )
+    except Exception:
+        pass
     
     # Extract cirrus before filtering (SCL value 10)
     cirrus_img = (scl_quality == 10).astype(np.float32)
     cirrus_img = remove_noise_clouds(cirrus_img)
     
     # Remove low quality images
-    steps_to_rm = np.argwhere(quality_per_img > 0.2).flatten()
+    steps_to_rm = np.argwhere(quality_per_img > quality_threshold).flatten()
     
     if len(steps_to_rm) > 0:
         logger.info(f"Removing {len(steps_to_rm)} low quality images")
+        try:
+            removed_vals = [float(quality_per_img[i]) for i in steps_to_rm]
+            logger.debug(f"Removed indices: {steps_to_rm.tolist()} with bad_frac values: {[round(v,3) for v in removed_vals]}")
+            removed_labels = []
+            for i in steps_to_rm:
+                item = filtered_items[i]
+                removed_labels.append(f"{getattr(item, 'id', 'n/a')}@{getattr(item, 'datetime', None)}")
+            if removed_labels:
+                logger.debug(f"Removed items: {removed_labels}")
+        except Exception:
+            pass
         keep_mask = np.ones(len(filtered_items), dtype=bool)
         keep_mask[steps_to_rm] = False
         filtered_items = [item for i, item in enumerate(filtered_items) if keep_mask[i]]
@@ -445,7 +577,13 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
         cirrus_img = cirrus_img[keep_mask]
     
     if len(filtered_items) == 0:
-        logger.warning("All images removed by quality filter")
+        try:
+            min_bad = float(np.min(quality_per_img)) if quality_per_img.size else float("nan")
+            logger.warning(
+                f"All images removed by quality filter; min bad_frac={min_bad:.3f}, threshold={quality_threshold:.2f}. Consider relaxing threshold or reviewing bbox/cloud classes."
+            )
+        except Exception:
+            logger.error("All images removed by quality filter")
         return (np.zeros((0,0,0,4), np.uint16),
                 np.zeros((0,0,0,6), np.uint16),
                 np.array([], np.int64),
@@ -463,7 +601,7 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
         dtype="uint16",
         chunks={}
     )
-    logger.info(f"Loaded 10m bands in {_elapsed_ms(t_10m):.0f} ms, shape: {ds_10m.sizes}")
+    logger.debug(f"Loaded 10m bands in {_elapsed_ms(t_10m):.0f} ms, shape: {ds_10m.sizes}")
     
     # Load 20m bands
     t_20m = time.perf_counter()
@@ -477,7 +615,7 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
         dtype="uint16",
         chunks={}
     )
-    logger.info(f"Loaded 20m bands in {_elapsed_ms(t_20m):.0f} ms, shape: {ds_20m.sizes}")
+    logger.debug(f"Loaded 20m bands in {_elapsed_ms(t_20m):.0f} ms, shape: {ds_20m.sizes}")
     
     # Process 10m bands
     img_10_list = []
@@ -525,7 +663,7 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
     # Prepare dates array (as julian days)
     dates_array = np.array(dates_to_download, np.int64)
     
-    logger.info(f"Final output shapes - 10m: {img_10.shape}, 20m: {img_20.shape}")
+    logger.debug(f"Final output shapes - 10m: {img_10.shape}, 20m: {img_20.shape}")
     
     return img_10, img_20, dates_array, cirrus_img.astype(np.float32)
 
@@ -540,7 +678,7 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
 @click.option('--Y_tile', 'y_tile', type=int, required=True, help='Y tile index')
 @click.option('--dest', type=str, required=True, help='Destination: local dir or s3://bucket/prefix')
 @click.option('--expansion', type=int, default=300, help='Legacy expansion baseline (default=300)')
-@click.option('--max-items', type=int, default=400, help='Maximum STAC items to search')
+@click.option('--max-items', type=int, default=100, help='Maximum STAC items to search')
 @click.option('--debug', is_flag=True, help='Enable debug logging')
 def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
          dest: str, expansion: int, max_items: int, debug: bool):
@@ -554,19 +692,20 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
     logger.add(sys.stderr, level=log_level, 
                format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
     
-    logger.info(f"Starting S2 download for tile {x_tile}X{y_tile}Y, year {year}")
-    logger.info(f"Location: lon={lon}, lat={lat}")
+    # Bind tile/year context
+    log = logger.bind(tile=f"{x_tile}X{y_tile}Y", year=year)
+    log.info(f"Starting S2 download; lon={lon}, lat={lat}")
     
     t_all = time.perf_counter()
     
     # Initialize storage
     if dest.startswith("s3://"):
         store = from_url(dest)
-        logger.info(f"Using S3 storage: {dest}")
+        log.info(f"Using S3 storage: {dest}")
     else:
         os.makedirs(dest, exist_ok=True)
         store = LocalStore(prefix=dest)
-        logger.info(f"Using local storage: {dest}")
+        log.info(f"Using local storage: {dest}")
     
     # Configure STAC/rio
     boto3_session = boto3.Session(region_name=S2_REGION)
@@ -581,8 +720,7 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
     cloud_size_km = (cloud_bbx[2] - cloud_bbx[0]) * 111.32
     tile_size_km = (tile_bbx[2] - tile_bbx[0]) * 111.32
     
-    logger.info(f"Cloud bbox: ~{cloud_size_km:.1f} km")
-    logger.info(f"Tile bbox: ~{tile_size_km:.1f} km")
+    log.debug(f"Cloud bbox: ~{cloud_size_km:.1f} km; Tile bbox: ~{tile_size_km:.1f} km")
     
     # Setup paths
     paths = SavePaths(root=dest.rstrip("/"), year=year, X_tile=x_tile, Y_tile=y_tile)
@@ -596,9 +734,9 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
     def _log_search_context(label: str, params: dict, search) -> None:
         try:
             url = search.url_with_parameters()
-            logger.warning(f"{label} STAC URL: {url}")
+            logger.debug(f"{label} STAC URL: {url}")
         except Exception:
-            logger.warning(f"{label} STAC params: {params}")
+            logger.debug(f"{label} STAC params: {params}")
 
     def _search_items(
         *,
@@ -633,17 +771,17 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
                 return items
             except Exception as e:
                 if attempt == attempts:
-                    logger.error(f"{label} STAC failed after {attempts} attempts: {e}")
+                    log.error(f"{label} STAC failed after {attempts} attempts: {e}")
                     raise
                 sleep_s = initial_backoff * (2 ** (attempt - 1))
-                logger.warning(
+                log.warning(
                     f"{label} STAC error on attempt {attempt}/{attempts}: {e}; retrying in {sleep_s:.1f}s"
                 )
                 time.sleep(sleep_s)
     
     # ========== STAGE 1: Cloud Identification ==========
     logger.info("=" * 50)
-    logger.info("STAGE 1: Cloud identification (large area)")
+    log.info("STAGE 1: Cloud identification (large area)")
     
     t_search = time.perf_counter()
     items_cloud = _search_items(
@@ -655,30 +793,22 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
         query={"eo:cloud_cover": {"lt": 50}},
         limit=max_items,
     )
-    logger.info(f"Found {len(items_cloud)} scenes in {_elapsed_ms(t_search):.0f} ms")
+    log.info(f"Found {len(items_cloud)} cloud scenes in {_elapsed_ms(t_search):.0f} ms")
     
     if len(items_cloud) == 0:
-        logger.warning("No scenes found for cloud analysis")
-        # Write empty outputs
-        obstore_put_hkl(store, paths.f_clean(), np.array([], np.int64))
-        obstore_put_hkl(store, paths.f_clouds(), np.zeros((0,0,0), np.float32))
-        obstore_put_hkl(store, paths.f_cloudmask(), np.zeros((0,0,0), np.uint8))
-        obstore_put_hkl(store, paths.f_s2_dates(), np.array([], np.int64))
-        obstore_put_hkl(store, paths.f_s2_10(), np.zeros((0,0,0,4), np.uint16))
-        obstore_put_hkl(store, paths.f_s2_20(), np.zeros((0,0,0,6), np.uint16))
-        return
+        log.error("No scenes found for cloud analysis")
+        raise SystemExit(2)
     
     # Identify clean dates
     t_cloud = time.perf_counter()
     clouds_legacy, cloud_percent, clean_steps, local_clouds = identify_clouds_stac(
-        items_cloud, cloud_bbx, year
+        items_cloud, cloud_bbx, year, log=log
     )
-    logger.info(f"Cloud analysis completed in {_elapsed_ms(t_cloud):.0f} ms")
-    logger.info(f"Identified {len(clean_steps)} clean dates")
+    log.info(f"Cloud analysis completed in {_elapsed_ms(t_cloud):.0f} ms; clean={len(clean_steps)}")
     
     if len(clean_steps) > 0 and debug:
-        logger.debug(f"Clean steps: {clean_steps[:min(5, len(clean_steps))]}")
-        logger.debug(f"Cloud %: min={cloud_percent.min():.1f}, mean={cloud_percent.mean():.1f}")
+        log.debug(f"Clean steps: {clean_steps[:min(5, len(clean_steps))]}")
+        log.debug(f"Cloud %: min={cloud_percent.min():.1f}, mean={cloud_percent.mean():.1f}")
     
     # Save cloud outputs
     obstore_put_hkl(store, paths.f_clouds(), clouds_legacy)
@@ -686,15 +816,11 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
     
     # ========== STAGE 2: Download Sentinel-2 Data ==========
     logger.info("=" * 50)
-    logger.info("STAGE 2: Download Sentinel-2 data (tile area)")
+    log.info("STAGE 2: Download Sentinel-2 data (tile area)")
     
     if len(clean_steps) == 0:
-        logger.warning("No clean dates to download")
-        obstore_put_hkl(store, paths.f_cloudmask(), np.zeros((0,0,0), np.uint8))
-        obstore_put_hkl(store, paths.f_s2_dates(), np.array([], np.int64))
-        obstore_put_hkl(store, paths.f_s2_10(), np.zeros((0,0,0,4), np.uint16))
-        obstore_put_hkl(store, paths.f_s2_20(), np.zeros((0,0,0,6), np.uint16))
-        return
+        log.error("No clean dates to download")
+        raise SystemExit(3)
     
     # Search tile area
     t_search = time.perf_counter()
@@ -707,14 +833,23 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
         query={"eo:cloud_cover": {"lt": 100}},
         limit=max_items,
     )
-    logger.info(f"Found {len(items_tile)} tile scenes in {_elapsed_ms(t_search):.0f} ms")
+    log.info(f"Found {len(items_tile)} tile scenes in {_elapsed_ms(t_search):.0f} ms")
+
+    # Coverage prefilter (geometry-based)
+    coverage_by_id = compute_coverage_by_id(items_tile, tile_bbx)
+    try:
+        cov_vals = [coverage_by_id.get(getattr(it, 'id', ''), 0.0) for it in items_tile]
+        if cov_vals:
+            log.debug(f"Coverage stats over tile: min={np.min(cov_vals):.2f}, p50={np.median(cov_vals):.2f}, max={np.max(cov_vals):.2f}")
+    except Exception:
+        pass
     
     # Download data for clean dates
     t_download = time.perf_counter()
     img_10, img_20, dates_array, cirrus_mask = download_sentinel2_stac(
-        items_tile, tile_bbx, clean_steps, year
+        items_tile, tile_bbx, clean_steps, year, coverage_by_id=coverage_by_id, log=log
     )
-    logger.info(f"Download completed in {_elapsed_ms(t_download):.0f} ms")
+    log.info(f"Download completed in {_elapsed_ms(t_download):.0f} ms")
     
     # Convert dates to DOY for s2_dates file
     if len(dates_array) > 0:
@@ -733,7 +868,7 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
     cloudmask_20 = (cirrus_mask > 0).astype(np.uint8)
     
     # Save outputs
-    logger.info("Saving outputs...")
+    log.debug("Saving outputs...")
     t_save = time.perf_counter()
     
     obstore_put_hkl(store, paths.f_cloudmask(), cloudmask_20)
@@ -741,15 +876,19 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
     obstore_put_hkl(store, paths.f_s2_10(), img_10)
     obstore_put_hkl(store, paths.f_s2_20(), img_20)
     
-    logger.info(f"Outputs saved in {_elapsed_ms(t_save):.0f} ms")
+    log.debug(f"Outputs saved in {_elapsed_ms(t_save):.0f} ms")
     
     # Summary
     total_time = _elapsed_ms(t_all)
-    logger.info("=" * 50)
-    logger.info(f"Processing complete in {total_time/1000:.1f} seconds")
-    logger.info(f"Output location: {paths.base}")
-    logger.info(f"Results: {len(clean_steps)} clean dates → {img_10.shape[0]} final images")
-    logger.info(f"Data shapes - 10m: {img_10.shape}, 20m: {img_20.shape}")
+    log.info("=" * 50)
+    if img_10.shape[0] > 0:
+        logger.bind(tile=f"{x_tile}X{y_tile}Y", year=year).success(
+            f"Completed {len(clean_steps)}→{img_10.shape[0]} images in {total_time/1000:.1f}s; out={paths.base}"
+        )
+    else:
+        log.error(
+            f"Pipeline produced 0 images after {len(clean_steps)} clean steps; investigate thresholds/coverage"
+        )
 
 # --- programmatic entrypoint for Lithops ---
 def run(
