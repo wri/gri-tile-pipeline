@@ -143,7 +143,7 @@ class JobTracker:
         
         with open(path, 'w') as f:
             f.write("=" * 60 + "\n")
-            f.write(f"LITHOPS JOB EXECUTION REPORT\n")
+            f.write("LITHOPS JOB EXECUTION REPORT\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("=" * 60 + "\n\n")
             
@@ -153,7 +153,7 @@ class JobTracker:
             f.write(f"Succeeded:      {succeeded} ({succeeded/total*100:.1f}%)\n")
             f.write(f"Failed:         {failed} ({failed/total*100:.1f}%)\n")
             f.write(f"Errors:         {errored} ({errored/total*100:.1f}%)\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"Avg Duration:   {avg_duration:.2f} sec\n")
             f.write(f"Min Duration:   {min_duration:.2f} sec\n")
             f.write(f"Max Duration:   {max_duration:.2f} sec\n")
@@ -303,7 +303,7 @@ def _wait_all_with_tracking(
                     stats = None
                     try:
                         stats = rf.response_future.stats
-                    except:
+                    except Exception:
                         pass
                     
                     if isinstance(result, Exception):
@@ -361,7 +361,7 @@ def _wait_all_with_tracking(
             stats = None
             try:
                 stats = rf.response_future.stats
-            except:
+            except Exception:
                 pass
             
             # Calculate duration if stats available
@@ -446,6 +446,37 @@ def main() -> None:
     if not args.dest:
         raise SystemExit("Please pass --dest or set DEST environment variable")
 
+    # Read tiles early to compute cost estimate and confirm before any resources are created
+    tiles = _read_tiles_csv(args.tiles_csv)
+
+    # Rough AWS Lambda cost estimate based on historical averages and configured memory
+    price_per_gb_sec = 0.00001667
+    mem_gb = args.mem / 1024.0
+    num_jobs = len(tiles)  # Each tile typically runs DEM + S1 + S2
+    avg_s1_sec = 14
+    avg_s2_sec = 62
+    avg_dem_sec = 9
+
+    est_cost_s1 = num_jobs * avg_s1_sec * mem_gb * price_per_gb_sec
+    est_cost_s2 = num_jobs * avg_s2_sec * mem_gb * price_per_gb_sec
+    est_cost_dem = num_jobs * avg_dem_sec * mem_gb * price_per_gb_sec
+    est_total = est_cost_s1 + est_cost_s2 + est_cost_dem
+
+    print("\n=== Cost Estimate (AWS Lambda) ===")
+    print(f"Tiles: {num_jobs}, Memory: {args.mem} MB (~{mem_gb:.2f} GB)")
+    print(f"Pricing used: ${price_per_gb_sec:.8f} per GB-second")
+    print("Based on historical average durations: S1=14s, S2=62s, DEM=9s")
+    print(f"Estimated S1 cost: ${est_cost_s1:.2f} for {num_jobs} jobs")
+    print(f"Estimated S2 cost: ${est_cost_s2:.2f} for {num_jobs} jobs")
+    print(f"Estimated DEM cost: ${est_cost_dem:.2f} for {num_jobs} jobs")
+    print(f"Estimated total compute cost: ${est_total:.2f}")
+    print("Note: This is a rough estimate based on trial runs; actual costs may vary.\n")
+
+    proceed = input("Proceed with job submission? [y/N]: ").strip().lower()
+    if proceed not in ("y", "yes"):
+        print("Aborting by user choice.")
+        return
+
     # Initialize job tracker
     tracker = JobTracker(args.report_dir)
 
@@ -457,10 +488,12 @@ def main() -> None:
     cfg_usw2.setdefault("aws_lambda", {})["runtime"] = args.runtime
     cfg_euc1.setdefault("aws_lambda", {})["runtime"] = args.runtime
 
-    tiles = _read_tiles_csv(args.tiles_csv)
-
     # Build per-task kwargs
     base_kwargs: List[Dict[str, Any]] = []
+    # NOTE: Potential optimization: filter out tiles whose expected outputs already exist
+    # before constructing tasks. For example, compute the expected S3 keys or local paths
+    # under args.dest for DEM/S1/S2 outputs and skip tiles where those files are present
+    # (e.g., using an S3 head_object or os.path.exists for local). This check would go here.
     for t in tiles:
         base_kwargs.append({
             "year": t["year"],
