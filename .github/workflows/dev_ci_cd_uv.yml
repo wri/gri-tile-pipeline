@@ -1,0 +1,42 @@
+name: Run Tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    strategy:
+      max-parallel: 4
+      matrix:
+        python-version: ["3.12"]
+    steps:
+     # Step 1: Checkout the repository
+     - name: Checkout code
+       uses: actions/checkout@v4
+
+     # Step 2: Install UV
+     - name: Install UV
+       uses: astral-sh/setup-uv@v6
+
+     # Step 3: Install dependencies
+     - name: Sync dependencies
+       run: uv sync --locked --all-extras --dev
+
+     # Step 4: Install Linux dependencies
+     - name: Install Linux dependencies
+       run: |
+        sudo apt update
+        sudo apt install -y gdal-bin libgdal-dev
+
+     # Step 5: Run tests
+     - name: Run Tests
+       env:
+        GFW_ACCESS_TOKEN: ${{ secrets.GFW_ACCESS_TOKEN }}
+       run: uv run pytest tests/
