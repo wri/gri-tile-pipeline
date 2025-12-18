@@ -249,7 +249,7 @@ def main():
         f"Starting DEM job year={args.year} tile={args.X_tile}X{args.Y_tile}Y dest={args.dest}"
     )
     if args.dest.startswith("s3://"):
-        store = from_url(args.dest, region = "us-west-2")
+        store = from_url(args.dest, region = "us-east-1")
     else:
         os.makedirs(args.dest, exist_ok=True)
         store = LocalStore(prefix=args.dest)

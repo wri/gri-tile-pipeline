@@ -700,7 +700,7 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
     
     # Initialize storage
     if dest.startswith("s3://"):
-        store = from_url(dest)
+        store = from_url(dest, region = "us-east-1")
         log.info(f"Using S3 storage: {dest}")
     else:
         os.makedirs(dest, exist_ok=True)
@@ -724,7 +724,7 @@ def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
     
     # Setup paths
     paths = SavePaths(root=dest.rstrip("/"), year=year, X_tile=x_tile, Y_tile=y_tile)
-    ensure_dirs(store, paths.clouds_dir, paths.misc_dir, paths.s2_10_dir, paths.s2_20_dir)
+    #ensure_dirs(store, paths.clouds_dir, paths.misc_dir, paths.s2_10_dir, paths.s2_20_dir)
     
     # STAC client
     client = Client.open(EARTH_SEARCH_V1)

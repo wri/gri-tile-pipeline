@@ -1030,7 +1030,7 @@ def main():
 
     # Setup output store (supports s3://bucket/prefix and local paths)
     if args.dest.startswith("s3://"):
-        store = from_url(args.dest, region = "us-west-2")
+        store = from_url(args.dest, region = "us-east-1")
     #if isinstance(store, LocalStore):
     else:
         os.makedirs(args.dest, exist_ok=True)
@@ -1040,7 +1040,7 @@ def main():
     base_key = f"{args.year}/raw/{args.X_tile}/{args.Y_tile}/raw"
     s1_dir_key = f"{base_key}/s1"
     misc_key = f"{base_key}/misc"
-    ensure_dirs(store, s1_dir_key, misc_key)
+    #ensure_dirs(store, s1_dir_key, misc_key)
     fn_s1_key = f"{s1_dir_key}/{args.X_tile}X{args.Y_tile}Y.hkl"
     fn_s1_dates_key = f"{misc_key}/s1_dates_{args.X_tile}X{args.Y_tile}Y.hkl"
 
