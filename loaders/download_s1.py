@@ -29,6 +29,7 @@ from rasterio.windows import from_bounds
 from rasterio.features import bounds as featureBounds
 from rasterio.warp import reproject, transform_bounds
 from rasterio.merge import merge
+from rasterio.crs import CRS
 import numpy as np
 from odc.stac import configure_rio
 from pystac_client import Client
@@ -42,6 +43,7 @@ from obstore.store import LocalStore, from_url
 import xml.etree.ElementTree as ET
 import requests
 from scipy.ndimage import distance_transform_edt
+from scipy.interpolate import RegularGridInterpolator
 import hashlib
 import pickle
 from pathlib import Path
@@ -294,29 +296,63 @@ def fetch_copdem_for_bbox(bbox: list, buffer: float = 0.00002) -> tuple:
                     pass
     
     # Calculate slope and aspect
-    slope, aspect = calculate_slope_aspect(dem_data, dem_transform)
+    slope, aspect = calculate_slope_aspect(dem_data, dem_transform, dem_crs)
     
     # Cache the results
     DEMCache.save_dem_cache(bbox, dem_data, dem_transform, dem_crs, slope, aspect)
     
     return dem_data, dem_transform, dem_crs, slope, aspect
 
-def calculate_slope_aspect(dem: np.ndarray, transform, resolution: float = 30) -> tuple:
-    """Calculate slope and aspect from DEM"""
+def calculate_slope_aspect(dem: np.ndarray, transform, dem_crs) -> tuple:
+    """Calculate slope and aspect from DEM.
+
+    Properly handles geographic (lat/lon) vs projected CRS by converting
+    pixel spacing to meters before computing gradients.
+    """
     logger.debug("Calculating slope and aspect from DEM")
-    
-    # Calculate gradients
-    dy, dx = np.gradient(dem, resolution)
-    
+
+    # Extract pixel sizes from transform
+    pixel_x = abs(transform.a)  # pixel width (may be degrees or meters)
+    pixel_y = abs(transform.e)  # pixel height (may be degrees or meters)
+
+    # Check if CRS is geographic (degrees) vs projected (meters)
+    crs_obj = CRS.from_user_input(dem_crs) if dem_crs else None
+    is_geographic = crs_obj.is_geographic if crs_obj else False
+
+    if is_geographic:
+        # Convert degrees to meters using latitude-aware calculation
+        # Get center latitude of the DEM for conversion
+        # transform.f is top-left Y, transform.e is negative pixel height
+        center_lat = transform.f + (transform.e * dem.shape[0] / 2)
+
+        # Meters per degree (approximate, varies with latitude)
+        meters_per_degree_lat = 111320.0  # approximately constant
+        meters_per_degree_lon = 111320.0 * np.cos(np.radians(center_lat))
+
+        # Convert pixel spacing from degrees to meters
+        resolution_y = pixel_y * meters_per_degree_lat
+        resolution_x = pixel_x * meters_per_degree_lon
+
+        logger.debug(f"Geographic CRS detected at lat={center_lat:.2f}°")
+        logger.debug(f"Pixel spacing: {pixel_y:.6f}° x {pixel_x:.6f}° = {resolution_y:.1f}m x {resolution_x:.1f}m")
+    else:
+        # Projected CRS - pixel spacing already in meters (or linear units)
+        resolution_y = pixel_y
+        resolution_x = pixel_x
+        logger.debug(f"Projected CRS - pixel spacing: {resolution_y:.1f}m x {resolution_x:.1f}m")
+
+    # Calculate gradients with correct spacing (dy uses Y spacing, dx uses X spacing)
+    dy, dx = np.gradient(dem, resolution_y, resolution_x)
+
     # Calculate slope (in radians)
     slope = np.arctan(np.sqrt(dx**2 + dy**2))
-    
+
     # Calculate aspect (in radians, 0 = North, clockwise)
     aspect = np.arctan2(-dx, dy)
     aspect = np.where(aspect < 0, aspect + 2*np.pi, aspect)
-    
+
     logger.debug(f"Slope range: {np.degrees(slope.min()):.1f} to {np.degrees(slope.max()):.1f} degrees")
-    
+
     return slope, aspect
 
 def s3_to_https(s3_url: str, region: str = S1_REGION) -> str:
@@ -602,6 +638,278 @@ def find_noise_asset(item, band_or_pol: str) -> str | None:
 
     return None
 
+
+def find_annotation_asset(item, band_or_pol: str) -> str | None:
+    """Find the annotation asset key for a given polarization.
+
+    Looks for annotation XML assets (iw-{pol}.xml pattern) that contain
+    incidence angle grids. Excludes calibration and noise XMLs.
+    """
+    pol = _infer_pol_from_band_key(band_or_pol)
+
+    # Try direct asset key patterns
+    candidates = [
+        f"iw-{pol}",
+        f"{pol}-iw",
+        f"iw{pol}",
+        f"annotation-{pol}",
+        f"{pol}-annotation",
+    ]
+
+    for name in candidates:
+        if name in item.assets:
+            href = getattr(item.assets[name], 'href', '') or ''
+            href_l = href.lower()
+            # Exclude calibration and noise XMLs
+            if 'calibration' not in href_l and 'noise' not in href_l:
+                logger.debug(f"Found annotation asset by key: {name}")
+                return name
+
+    # Fallback: search by href pattern
+    for asset_name, asset in item.assets.items():
+        href = getattr(asset, 'href', '') or ''
+        href_l = href.lower()
+
+        # Skip calibration and noise XMLs
+        if 'calibration' in href_l or 'noise' in href_l:
+            continue
+
+        # Look for annotation XML with matching polarization
+        if '/annotation/' in href_l and pol in href_l and href_l.endswith('.xml'):
+            logger.debug(f"Found annotation asset by href pattern: {asset_name}")
+            return asset_name
+
+        # Match iw-{pol}.xml pattern in href
+        if f"iw-{pol}.xml" in href_l or f"iw{pol}.xml" in href_l:
+            logger.debug(f"Found annotation asset by filename: {asset_name}")
+            return asset_name
+
+    # Try constructing annotation URL from existing asset paths
+    # The annotation file is typically in the same directory structure
+    for asset_name in ['vv', 'vh', pol]:
+        if asset_name in item.assets:
+            base_href = item.assets[asset_name].href
+            # Convert measurement path to annotation path
+            # e.g., .../measurement/iw-vv.tiff -> .../annotation/iw-vv.xml
+            if '/measurement/' in base_href:
+                annotation_url = base_href.replace('/measurement/', '/annotation/')
+                annotation_url = annotation_url.rsplit('.', 1)[0] + '.xml'
+                # Return a synthetic key with the constructed URL
+                logger.debug(f"Constructed annotation URL from {asset_name}: {annotation_url}")
+                return f"__annotation_url__:{annotation_url}"
+
+    return None
+
+
+def get_annotation_href(item, annotation_key: str | None) -> str | None:
+    """Get the annotation href from an asset key or synthetic key."""
+    if annotation_key is None:
+        return None
+
+    # Handle synthetic keys (constructed URLs)
+    if annotation_key.startswith("__annotation_url__:"):
+        return annotation_key.split(":", 1)[1]
+
+    # Regular asset key
+    if annotation_key in item.assets:
+        return item.assets[annotation_key].href
+
+    return None
+
+
+def parse_incidence_angle_grid(annotation_url: str) -> dict | None:
+    """Parse Sentinel-1 annotation XML to extract incidence angle grid.
+
+    Extracts the sparse geolocation grid (~10×21 points) with incidence angles
+    that can be interpolated to full resolution.
+
+    Returns:
+        dict with keys:
+            'lines': 1D array of unique azimuth line indices
+            'pixels': 1D array of unique range pixel indices
+            'angles': 2D array (n_lines × n_pixels) of incidence angles in degrees
+            'mid_swath': incidenceAngleMidSwath value as fallback
+        Returns None on error.
+    """
+    https_url = s3_to_https(annotation_url)
+    logger.debug(f"Fetching annotation XML from {https_url}")
+
+    try:
+        response = requests.get(https_url, timeout=30)
+        response.raise_for_status()
+        root = ET.fromstring(response.content)
+
+        # Extract mid-swath incidence angle (scalar fallback)
+        mid_swath = 35.0  # default
+        mid_swath_el = root.find('.//imageAnnotation/imageInformation/incidenceAngleMidSwath')
+        if mid_swath_el is not None and mid_swath_el.text:
+            try:
+                mid_swath = float(mid_swath_el.text)
+            except ValueError:
+                pass
+
+        # Extract geolocation grid
+        grid_list = root.find('.//geolocationGrid/geolocationGridPointList')
+        if grid_list is None:
+            logger.warning("No geolocation grid found in annotation XML, using mid-swath value")
+            return {'lines': np.array([0]), 'pixels': np.array([0]),
+                    'angles': np.array([[mid_swath]]), 'mid_swath': mid_swath}
+
+        grid_points = grid_list.findall('geolocationGridPoint')
+        if not grid_points:
+            logger.warning("Empty geolocation grid in annotation XML")
+            return {'lines': np.array([0]), 'pixels': np.array([0]),
+                    'angles': np.array([[mid_swath]]), 'mid_swath': mid_swath}
+
+        # Collect all grid points
+        points_data = []
+        for point in grid_points:
+            try:
+                line = int(point.find('line').text)
+                pixel = int(point.find('pixel').text)
+                inc_angle = float(point.find('incidenceAngle').text)
+                points_data.append((line, pixel, inc_angle))
+            except (AttributeError, ValueError, TypeError) as e:
+                logger.debug(f"Skipping malformed grid point: {e}")
+                continue
+
+        if not points_data:
+            logger.warning("No valid grid points parsed")
+            return {'lines': np.array([0]), 'pixels': np.array([0]),
+                    'angles': np.array([[mid_swath]]), 'mid_swath': mid_swath}
+
+        # Get unique sorted line and pixel indices from points data
+        all_lines = np.array([p[0] for p in points_data])
+        all_pixels = np.array([p[1] for p in points_data])
+
+        unique_lines = np.unique(all_lines)
+        unique_pixels = np.unique(all_pixels)
+
+        # Build 2D grid (n_lines × n_pixels)
+        angle_grid = np.full((len(unique_lines), len(unique_pixels)), np.nan, dtype=np.float32)
+
+        # Map indices
+        line_to_idx = {line_val: i for i, line_val in enumerate(unique_lines)}
+        pixel_to_idx = {pixel_val: i for i, pixel_val in enumerate(unique_pixels)}
+
+        for line, pixel, angle in points_data:
+            li = line_to_idx.get(line)
+            pi = pixel_to_idx.get(pixel)
+            if li is not None and pi is not None:
+                angle_grid[li, pi] = angle
+
+        # Log grid info
+        valid_mask = ~np.isnan(angle_grid)
+        if np.any(valid_mask):
+            angle_min = np.nanmin(angle_grid)
+            angle_max = np.nanmax(angle_grid)
+            logger.debug(f"Parsed incidence angle grid: {len(unique_lines)}×{len(unique_pixels)} points, "
+                        f"range: {angle_min:.2f}° to {angle_max:.2f}°")
+        else:
+            logger.warning("All grid points have NaN angles")
+
+        return {
+            'lines': unique_lines,
+            'pixels': unique_pixels,
+            'angles': angle_grid,
+            'mid_swath': mid_swath,
+        }
+
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Failed to fetch annotation XML: {e}")
+        return None
+    except ET.ParseError as e:
+        logger.warning(f"Failed to parse annotation XML: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Unexpected error parsing annotation XML: {e}")
+        return None
+
+
+def interpolate_incidence_angle_to_image(grid_data: dict, shape: tuple) -> np.ndarray:
+    """Interpolate sparse incidence angle grid to full image dimensions.
+
+    Uses RegularGridInterpolator for bilinear interpolation with
+    distance_transform_edt fallback for edge extrapolation.
+
+    Args:
+        grid_data: dict from parse_incidence_angle_grid() with keys:
+            'lines', 'pixels', 'angles', 'mid_swath'
+        shape: target (height, width) tuple
+
+    Returns:
+        float32 array of shape matching input, containing incidence angles in degrees
+    """
+    h, w = shape
+
+    # Handle degenerate case (single point or no grid)
+    if grid_data is None:
+        logger.warning("No incidence angle grid data, using default 35°")
+        return np.full((h, w), 35.0, dtype=np.float32)
+
+    lines = grid_data['lines']
+    pixels = grid_data['pixels']
+    angles = grid_data['angles']
+    mid_swath = grid_data.get('mid_swath', 35.0)
+
+    # If grid is too small, just use mid-swath value
+    if len(lines) < 2 or len(pixels) < 2:
+        logger.debug(f"Grid too small ({len(lines)}×{len(pixels)}), using mid-swath: {mid_swath:.2f}°")
+        return np.full((h, w), mid_swath, dtype=np.float32)
+
+    # Fill any NaN values in the sparse grid with nearest neighbor before interpolation
+    if np.any(np.isnan(angles)):
+        mask = ~np.isnan(angles)
+        if np.any(mask):
+            indices = distance_transform_edt(~mask, return_indices=True)[1]
+            angles = angles[tuple(indices)]
+        else:
+            logger.warning("All angles are NaN, using mid-swath")
+            return np.full((h, w), mid_swath, dtype=np.float32)
+
+    # Create interpolator with the sparse grid
+    # Note: RegularGridInterpolator expects (row_coords, col_coords), data[row, col]
+    try:
+        interp = RegularGridInterpolator(
+            (lines.astype(np.float64), pixels.astype(np.float64)),
+            angles.astype(np.float64),
+            method='linear',
+            bounds_error=False,
+            fill_value=None  # Extrapolate outside bounds
+        )
+    except ValueError as e:
+        logger.warning(f"Failed to create interpolator: {e}, using mid-swath")
+        return np.full((h, w), mid_swath, dtype=np.float32)
+
+    # Create target grid coordinates
+    target_lines = np.arange(h, dtype=np.float64)
+    target_pixels = np.arange(w, dtype=np.float64)
+
+    # Create meshgrid for all target points
+    ll, pp = np.meshgrid(target_lines, target_pixels, indexing='ij')
+    points = np.stack([ll.ravel(), pp.ravel()], axis=-1)
+
+    # Interpolate
+    interpolated = interp(points).reshape(h, w).astype(np.float32)
+
+    # Handle any remaining NaN values from extrapolation using nearest neighbor
+    nan_mask = np.isnan(interpolated)
+    if np.any(nan_mask):
+        valid_mask = ~nan_mask
+        if np.any(valid_mask):
+            indices = distance_transform_edt(nan_mask, return_indices=True)[1]
+            interpolated = interpolated[tuple(indices)]
+        else:
+            logger.warning("All interpolated values are NaN, using mid-swath")
+            interpolated = np.full((h, w), mid_swath, dtype=np.float32)
+
+    angle_min = interpolated.min()
+    angle_max = interpolated.max()
+    logger.debug(f"Interpolated incidence angle to {h}×{w}, range: {angle_min:.2f}° to {angle_max:.2f}°")
+
+    return interpolated
+
+
 def interpolate_lut_to_image(lut_data: dict, image_shape: tuple) -> np.ndarray:
     """Interpolate calibration LUT to full image size"""
     h, w = image_shape
@@ -691,9 +999,26 @@ def apply_radiometric_calibration(dn_data: np.ndarray, calibration_lut: np.ndarr
     return gamma0
 
 def apply_terrain_flattening(gamma0: np.ndarray, slope: np.ndarray, aspect: np.ndarray,
-                            incidence_angle: float, look_direction: float) -> np.ndarray:
-    """Apply terrain flattening to convert gamma0 to gamma0_terrain"""
-    logger.debug(f"Applying terrain flattening (incidence: {incidence_angle:.1f}°)")
+                            incidence_angle: float | np.ndarray, look_direction: float) -> np.ndarray:
+    """Apply terrain flattening to convert gamma0 to gamma0_terrain.
+
+    Args:
+        gamma0: Radiometrically calibrated backscatter
+        slope: Terrain slope in radians
+        aspect: Terrain aspect in radians
+        incidence_angle: Incidence angle in degrees (scalar or array matching gamma0 shape)
+        look_direction: Satellite look direction in radians
+
+    Returns:
+        Terrain-flattened gamma0 array
+    """
+    # Log incidence angle info
+    if isinstance(incidence_angle, np.ndarray):
+        angle_min = incidence_angle.min()
+        angle_max = incidence_angle.max()
+        logger.debug(f"Applying terrain flattening (incidence array: {angle_min:.2f}° to {angle_max:.2f}°)")
+    else:
+        logger.debug(f"Applying terrain flattening (incidence: {incidence_angle:.1f}°)")
     
     # Convert to radians
     theta_i = np.radians(incidence_angle)
@@ -736,39 +1061,61 @@ def get_item_geometry(item) -> tuple:
     
     return float(incidence_angle), look_direction
 
-def find_calibration_asset(item, band: str) -> str:
-    """Find the correct calibration asset name for a band"""
+def find_calibration_asset(item, band: str) -> str | None:
+    """Find the correct calibration asset name for a band.
+
+    Uses polarization-aware matching to avoid returning VH calibration for VV or vice versa.
+    """
+    # Get polarization from band name
+    pol = _infer_pol_from_band_key(band)
+
     # List all available assets for debugging
     logger.debug(f"Available assets for {item.id}: {list(item.assets.keys())}")
-    
-    # Try different naming conventions
+    logger.debug(f"Looking for calibration for polarization: {pol}")
+
+    # Try polarization-specific naming conventions first
     possible_names = [
-        f"{band}-calibration",
-        f"calibration-{band}",
-        f"{band}_calibration",
-        f"calibration_{band}",
-        "calibration",  # Sometimes it's a single asset for all bands
-        f"{band}-cal",
-        f"cal-{band}"
+        f"{pol}-calibration",
+        f"calibration-{pol}",
+        f"{pol}_calibration",
+        f"calibration_{pol}",
+        f"schema-calibration-{pol}.xml",
+        f"{pol}-cal",
+        f"cal-{pol}",
     ]
-    
+
     for name in possible_names:
         if name in item.assets:
             logger.debug(f"Found calibration asset: {name}")
             return name
-    
-    # Check if there's a general calibration asset with band info in description
+
+    # Fallback: search by asset name or href, but REQUIRE polarization match
     for asset_name, asset in item.assets.items():
-        if 'calibration' in asset_name.lower() or 'cal' in asset_name.lower():
-            logger.debug(f"Found potential calibration asset: {asset_name}")
+        name_l = asset_name.lower()
+        href = getattr(asset, 'href', '') or ''
+        href_l = href.lower()
+
+        # Only return if BOTH polarization AND calibration keywords are present
+        if pol in name_l and ('calibration' in name_l or 'cal' in name_l):
+            logger.debug(f"Found calibration asset by name match: {asset_name}")
             return asset_name
-    
+
+        # Check href for calibration files with matching polarization
+        if href_l.endswith(f"schema-calibration-{pol}.xml"):
+            logger.debug(f"Found calibration asset by href match: {asset_name}")
+            return asset_name
+        if pol in href_l and ('calibration' in href_l or '/cal' in href_l) and href_l.endswith('.xml'):
+            logger.debug(f"Found calibration asset by href content match: {asset_name}")
+            return asset_name
+
+    logger.warning(f"No calibration asset found for polarization {pol}")
     return None
 
 def process_band_with_terrain_correction(
     data_href: str,
     calibration_href: str,
     noise_href: str | None,
+    annotation_href: str | None,
     bounds: tuple,
     target_crs: str,
     dem_data: np.ndarray,
@@ -776,16 +1123,36 @@ def process_band_with_terrain_correction(
     dem_crs,
     slope: np.ndarray,
     aspect: np.ndarray,
-    incidence_angle: float,
+    incidence_angle_fallback: float,
     look_direction: float,
-    aws_session
+    aws_session,
+    simplified_incidence: bool = False,
 ) -> np.ndarray:
-    """Process a single band with calibration and terrain correction"""
-    
+    """Process a single band with calibration and terrain correction.
+
+    Args:
+        data_href: URL to the SAR data
+        calibration_href: URL to the calibration XML
+        noise_href: URL to the thermal noise XML (optional)
+        annotation_href: URL to the annotation XML for incidence angle grid (optional)
+        bounds: Target bounding box
+        target_crs: Target CRS
+        dem_data: DEM array
+        dem_transform: DEM transform
+        dem_crs: DEM CRS
+        slope: Terrain slope array
+        aspect: Terrain aspect array
+        incidence_angle_fallback: Fallback incidence angle from STAC properties (degrees)
+        look_direction: Satellite look direction (radians)
+        aws_session: AWS session for rasterio
+        simplified_incidence: If True, use mid-swath scalar instead of interpolated grid
+    """
+
     logger.debug("Processing band with terrain correction")
     logger.debug(f"Data URL: {data_href}")
     logger.debug(f"Calibration URL: {calibration_href}")
     logger.debug(f"Noise URL: {noise_href}")
+    logger.debug(f"Annotation URL: {annotation_href}")
     
     with rio.Env(aws_session):
         # Read the raw data
@@ -804,9 +1171,29 @@ def process_band_with_terrain_correction(
                 dn_data = vrt.read(1, window=win).astype(np.float32)
                 sar_transform = vrt.window_transform(win)
                 sar_shape = dn_data.shape
-                
+
                 logger.debug(f"Read data shape: {sar_shape}, DN range: {dn_data.min():.1f} to {dn_data.max():.1f}")
-    
+
+    # Determine incidence angle (array or scalar)
+    incidence_angle: float | np.ndarray = incidence_angle_fallback
+
+    if annotation_href:
+        grid_data = parse_incidence_angle_grid(annotation_href)
+        if grid_data is not None:
+            if simplified_incidence:
+                # Use mid-swath scalar value
+                incidence_angle = grid_data.get('mid_swath', incidence_angle_fallback)
+                logger.debug(f"Using mid-swath incidence angle: {incidence_angle:.2f}°")
+            else:
+                # Interpolate to full image size
+                incidence_angle = interpolate_incidence_angle_to_image(grid_data, sar_shape)
+                logger.debug(f"Using incidence angle from annotation XML grid: "
+                            f"{incidence_angle.min():.2f}° to {incidence_angle.max():.2f}°")
+        else:
+            logger.debug(f"Failed to parse annotation, using STAC/fallback incidence angle: {incidence_angle_fallback:.1f}°")
+    else:
+        logger.debug(f"No annotation URL, using STAC/fallback incidence angle: {incidence_angle_fallback:.1f}°")
+
     # Parse and apply thermal noise + calibration
     noise_lut = None
     if noise_href:
@@ -884,15 +1271,59 @@ def process_band_with_terrain_correction(
     # Convert to uint16 for storage
     valid_mask = gamma0_terrain > 0
     if np.any(valid_mask):
-        # Use percentiles to avoid outliers
+        # Compute percentiles for diagnostics and optional scaling
         p1, p99 = np.percentile(gamma0_terrain[valid_mask], [0.1, 99.9])
-        logger.debug(f"Scaling from [{p1:.2f}, {p99:.2f}] to uint16")
         p0, p25, p50, p75, p100 = np.percentile(gamma0_terrain[valid_mask], [0, 25, 50, 75, 100])
-        logger.debug(f"Percentiles: {p0:.2f}, {p25:.2f}, {p50:.2f}, {p75:.2f}, {p100:.2f}")
-        
-        # Scale to uint16 range
-        #scaled = np.clip((gamma0_terrain - p1) / (p99 - p1 + 1e-10), 0, 1) * 65535
+        logger.debug(f"Gamma0 terrain percentiles: p0={p0:.4f}, p25={p25:.4f}, p50={p50:.4f}, p75={p75:.4f}, p100={p100:.4f}")
+        logger.debug(f"Gamma0 terrain p0.1={p1:.4f}, p99.9={p99:.4f}")
+
+        # =======================================================================
+        # Temporary debugging - looking into impact of scaling options:
+        # =======================================================================
+
+        #   | Option      | Method                   | Best For                               |
+        #   |-------------|--------------------------|----------------------------------------|
+        #   | A (current) | Clip [0, 1]              | May clip valid data? (gamma0 can > 1)  |
+        #   | B           | Percentile normalization | Maximizing dynamic range per scene     |
+        #   | C           | Linear [0, 2]            | Consistent scaling, most land surfaces |
+        #   | D           | Linear [0, 3]            | Urban areas, strong scatterers         |
+        #   | E           | dB [-30, +10]            | Standard SAR, wide dynamic range       |
+        #   | F           | dB [-25, +5]             | Vegetation/agriculture focus           |
+
+        # OPTION A: Current - Hard clip at [0, 1] (PROBLEMATIC: gamma0 can exceed 1)
+        # Use case: Only valid if gamma0 is always < 1 (rarely true)
+        # Problem: Clips high backscatter from urban areas, corner reflectors
         scaled = np.clip(gamma0_terrain, 0, 1) * 65535
+
+        # OPTION B: Percentile-based normalization (preserves relative differences)
+        # Use case: Maximizes dynamic range, good for visualization
+        # Problem: Absolute values are lost, varies per scene
+        # scaled = np.clip((gamma0_terrain - p1) / (p99 - p1 + 1e-10), 0, 1) * 65535
+
+        # OPTION C: Fixed linear range [0, 2] (gamma0 rarely exceeds 2)
+        # Use case: Consistent scaling across scenes, preserves most data
+        # Problem: Very high backscatter (>2) still clipped
+        # scaled = np.clip(gamma0_terrain / 2.0, 0, 1) * 65535
+
+        # OPTION D: Fixed linear range [0, 3] (more headroom for bright targets)
+        # Use case: Urban areas, strong scatterers
+        # Problem: Reduces precision for typical vegetation/soil values
+        # scaled = np.clip(gamma0_terrain / 3.0, 0, 1) * 65535
+
+        # OPTION E: dB scale - standard for SAR, maps -30 to +10 dB
+        # Use case: Standard SAR visualization, compresses dynamic range naturally
+        # Problem: Requires knowing the dB range of interest
+        # gamma0_db = 10 * np.log10(np.where(gamma0_terrain > 1e-10, gamma0_terrain, 1e-10))
+        # scaled = np.clip((gamma0_db + 30) / 40, 0, 1) * 65535  # -30dB->0, +10dB->65535
+
+        # OPTION F: dB scale - narrower range -25 to +5 dB (typical land surfaces)
+        # Use case: Better precision for vegetation/agriculture
+        # gamma0_db = 10 * np.log10(np.where(gamma0_terrain > 1e-10, gamma0_terrain, 1e-10))
+        # scaled = np.clip((gamma0_db + 25) / 30, 0, 1) * 65535  # -25dB->0, +5dB->65535
+
+        # =======================================================================
+
+        logger.debug("Scaling method: OPTION A (clip 0-1)")
     else:
         logger.warning("No valid data after processing, returning zeros")
         scaled = np.zeros_like(gamma0_terrain)
@@ -932,10 +1363,12 @@ def process_band_simple(
                 return data.astype(np.uint16)
 
 def get_quarterly_scenes_by_coverage(items: list, year: int, tile_bounds: tuple,
-                                     coverage_threshold: float = 0.95) -> tuple:
-    """Select one scene per quarter, preferring items whose footprint covers the tile.
+                                     coverage_threshold: float = 0.95,
+                                     k_scenes: int = 1) -> tuple:
+    """Select up to k_scenes per quarter, preferring items whose footprint covers the tile.
 
     Returns (selected_items_dict, per_quarter_metadata_list)
+    where selected_items_dict[quarter] is a list of items (length <= k_scenes)
     """
     quarters = {
         'Q1': (f'{year}-01-15', f'{year}-03-15'),
@@ -959,15 +1392,15 @@ def get_quarterly_scenes_by_coverage(items: list, year: int, tile_bounds: tuple,
 
         if not quarter_items:
             logger.warning(f"{q_name}: No scenes found")
-            selected[q_name] = None
+            selected[q_name] = []
             quarter_meta.append({
                 "quarter": q_name,
                 "candidate_count": 0,
-                "selected_id": None,
-                "selected_datetime": None,
+                "selected_ids": [],
+                "selected_datetimes": [],
                 "selected_orbit": None,
-                "coverage_fraction": 0.0,
-                "meets_threshold": False,
+                "coverage_fractions": [],
+                "k_selected": 0,
             })
             continue
 
@@ -978,26 +1411,75 @@ def get_quarterly_scenes_by_coverage(items: list, year: int, tile_bounds: tuple,
             scored.append((cf, it))
 
         scored.sort(key=lambda t: t[0], reverse=True)
-        best_cf, best_item = scored[0]
 
-        meets = best_cf >= coverage_threshold
-        if not meets:
-            logger.warning(f"{q_name}: Best coverage {best_cf:.3f} below threshold {coverage_threshold:.3f}; using best available scene anyway")
-        else:
-            logger.info(f"{q_name}: Selected scene with coverage {best_cf:.3f}")
+        # Select top k_scenes that meet coverage threshold (or best available)
+        top_k = []
+        for cf, it in scored[:k_scenes]:
+            if cf >= coverage_threshold or len(top_k) == 0:
+                top_k.append((cf, it))
+            else:
+                # Below threshold and we already have at least one scene
+                break
 
-        selected[q_name] = best_item
+        # If we didn't get any above threshold, take the best one anyway
+        if not top_k:
+            top_k = [scored[0]]
+
+        selected[q_name] = [it for cf, it in top_k]
+        coverages = [cf for cf, it in top_k]
+
+        logger.info(f"{q_name}: Selected {len(top_k)} scene(s) with coverages {[f'{c:.3f}' for c in coverages]}")
+
         quarter_meta.append({
             "quarter": q_name,
             "candidate_count": len(scored),
-            "selected_id": best_item.id,
-            "selected_datetime": best_item.properties.get("datetime"),
-            "selected_orbit": best_item.properties.get('sat:orbit_state'),
-            "coverage_fraction": float(best_cf),
-            "meets_threshold": bool(meets),
+            "selected_ids": [it.id for cf, it in top_k],
+            "selected_datetimes": [it.properties.get("datetime") for cf, it in top_k],
+            "selected_orbit": top_k[0][1].properties.get('sat:orbit_state') if top_k else None,
+            "coverage_fractions": coverages,
+            "k_selected": len(top_k),
         })
 
     return selected, quarter_meta
+
+
+def composite_quarter_scenes(scene_arrays: list, method: str = 'mean') -> np.ndarray:
+    """Composite multiple scene arrays into a single array using specified method.
+
+    Args:
+        scene_arrays: List of arrays, each with shape (bands, H, W)
+        method: 'median' or 'mean'
+
+    Returns:
+        Composited array with shape (bands, H, W)
+    """
+    if not scene_arrays:
+        raise ValueError("No scenes to composite")
+
+    if len(scene_arrays) == 1:
+        return scene_arrays[0]
+
+    # Stack all scenes: (k, bands, H, W)
+    stacked = np.stack(scene_arrays, axis=0).astype(np.float32)
+
+    # Replace zeros with NaN for proper median/mean calculation
+    stacked = np.where(stacked == 0, np.nan, stacked)
+
+    # Compute composite
+    with np.errstate(all='ignore'):
+        if method == 'median':
+            composited = np.nanmedian(stacked, axis=0)
+        elif method == 'mean':
+            composited = np.nanmean(stacked, axis=0)
+        else:
+            raise ValueError(f"Unknown compositing method: {method}")
+
+    # Replace NaN with 0
+    composited = np.where(np.isnan(composited), 0, composited)
+
+    logger.debug(f"Composited {len(scene_arrays)} scenes using {method}, shape: {composited.shape}")
+
+    return composited.astype(np.uint16)
 
 def main():
     ap = argparse.ArgumentParser(description="Load Sentinel-1 data with terrain correction (quarterly, obstore).")
@@ -1011,6 +1493,11 @@ def main():
     ap.add_argument("--coverage-threshold", type=float, default=0.95, help="Minimum tile coverage fraction to prefer a scene")
     ap.add_argument("--no-terrain-correction", action="store_true", help="Disable terrain correction")
     ap.add_argument("--no-calibration", action="store_true", help="Disable radiometric calibration")
+    ap.add_argument("--simplified-incidence", action="store_true",
+                    help="Use mid-swath incidence angle only (faster, less accurate)")
+    ap.add_argument("--orbit-direction", type=str, choices=["ASCENDING", "DESCENDING", "BOTH"], default="ASCENDING",
+                    help="Filter by orbit direction (default: ASCENDING)")
+    ap.add_argument("--k-scenes", type=int, default=3, help="Number of scenes to composite per quarter (default: 3)")
     ap.add_argument("--debug", action="store_true", help="Enable debug logging")
     ap.add_argument("--run-metadata", action="store_true", help="Write metadata sidecar file")
     args = ap.parse_args()
@@ -1056,11 +1543,24 @@ def main():
         limit=500,
     )
 
+    url = search.url_with_parameters()
+    logger.debug(f"STAC URL: {url}")
+
     items = list(search.items())
     if not items:
         raise RuntimeError("No Sentinel-1 items found for query.")
 
     logger.info(f"Found {len(items)} Sentinel-1 scenes for {args.year}")
+
+    # Filter by orbit direction
+    if args.orbit_direction != "BOTH":
+        items = [
+            item for item in items
+            if item.properties.get("sat:orbit_state", "").upper() == args.orbit_direction
+        ]
+        logger.info(f"Filtered to {len(items)} scenes for {args.orbit_direction} orbit")
+        if not items:
+            raise RuntimeError(f"No Sentinel-1 items found for {args.orbit_direction} orbit.")
 
     # Get DEM data if terrain correction is enabled
     dem_data = dem_transform = dem_crs = slope = aspect = None
@@ -1075,12 +1575,14 @@ def main():
     tile_bounds = featureBounds(bbox2geojson(bbx))
 
     # Select quarterly scenes with coverage filtering
-    quarterly_items, quarter_meta = get_quarterly_scenes_by_coverage(items, args.year, tile_bounds, args.coverage_threshold)
+    quarterly_items, quarter_meta = get_quarterly_scenes_by_coverage(
+        items, args.year, tile_bounds, args.coverage_threshold, args.k_scenes
+    )
     
     # Determine which polarizations exist
     akeys = set()
-    for item in quarterly_items.values():
-        if item:
+    for item_list in quarterly_items.values():
+        for item in item_list:
             akeys.update(item.assets.keys())
     
     # Debug: Show all available asset keys
@@ -1108,14 +1610,118 @@ def main():
     target_crs = "EPSG:4326"
     bounds = tile_bounds
 
-    # Process each quarter
+    # Process each quarter with multi-scene compositing
     quarterly_arrays = []
     quarter_band_stats = {q: {} for q in ['Q1','Q2','Q3','Q4']}
-    
+
+    def process_single_item(item, bands, bounds, target_crs, dem_data, dem_transform, dem_crs,
+                            slope, aspect, aws_session, no_calibration, no_terrain_correction,
+                            simplified_incidence=False):
+        """Process a single STAC item and return array of shape (bands, H, W)."""
+        # Get geometry for this scene (fallback incidence angle from STAC properties)
+        incidence_angle_fallback, look_direction = get_item_geometry(item)
+
+        # Process each band
+        band_arrays = []
+        for band in bands:
+            logger.debug(f"  Looking for band: {band}")
+
+            # Check if band exists in assets
+            actual_band = band
+            if band not in item.assets:
+                logger.warning(f"    Band {band} not found in assets")
+                # Try alternative naming
+                found = False
+                for asset_name in item.assets:
+                    if band in asset_name.lower():
+                        logger.info(f"    Using alternative asset name: {asset_name} for band {band}")
+                        actual_band = asset_name
+                        found = True
+                        break
+
+                if not found:
+                    logger.warning(f"    Could not find {band} in any form, using zeros")
+                    if band_arrays:
+                        shape = band_arrays[0].shape
+                    else:
+                        shape = (512, 512)
+                    band_arrays.append(np.zeros(shape, dtype=np.uint16))
+                    continue
+
+            # Process the band
+            if actual_band in item.assets:
+                logger.debug(f"    Processing band {actual_band}")
+
+                # Try to find calibration asset - use the original band name (vv or vh)
+                cal_asset_name = None
+                if not no_calibration:
+                    cal_asset_name = find_calibration_asset(item, band)
+                # Try to find thermal noise asset per polarization
+                noise_asset_name = find_noise_asset(item, band)
+                # Try to find annotation asset for incidence angle grid
+                annotation_asset_name = find_annotation_asset(item, band)
+
+                if cal_asset_name and not no_calibration:
+                    cal_href = item.assets[cal_asset_name].href
+                    logger.debug(f"    Using calibration from: {cal_asset_name}")
+                else:
+                    cal_href = None
+                    if not no_calibration:
+                        logger.warning(f"    No calibration found for {band}")
+                if noise_asset_name:
+                    noise_href = item.assets[noise_asset_name].href
+                    logger.debug(f"    Using thermal noise from: {noise_asset_name}")
+                else:
+                    noise_href = None
+                # Get annotation href (handles both regular and synthetic keys)
+                annotation_href = get_annotation_href(item, annotation_asset_name)
+                if annotation_href:
+                    logger.debug(f"    Using annotation from: {annotation_asset_name}")
+                else:
+                    logger.debug(f"    No annotation asset found for {band}")
+
+                if dem_data is not None and not no_terrain_correction and cal_href:
+                    # Full processing with calibration and terrain correction
+                    arr = process_band_with_terrain_correction(
+                        item.assets[actual_band].href,
+                        cal_href,
+                        noise_href,
+                        annotation_href,
+                        bounds,
+                        target_crs,
+                        dem_data, dem_transform, dem_crs,
+                        slope, aspect,
+                        incidence_angle_fallback, look_direction,
+                        aws_session,
+                        simplified_incidence=simplified_incidence,
+                    )
+                else:
+                    # Simple processing
+                    arr = process_band_simple(
+                        item.assets[actual_band].href,
+                        bounds,
+                        target_crs,
+                        aws_session
+                    )
+
+                band_arrays.append(arr)
+            else:
+                logger.warning(f"    Band {actual_band} not available")
+                if band_arrays:
+                    shape = band_arrays[0].shape
+                else:
+                    shape = (512, 512)
+                band_arrays.append(np.zeros(shape, dtype=np.uint16))
+
+        if band_arrays:
+            return np.stack(band_arrays, axis=0)
+        else:
+            return None
+
     for q_name in ['Q1', 'Q2', 'Q3', 'Q4']:
-        item = quarterly_items.get(q_name)
-        
-        if item is None:
+        item_list = quarterly_items.get(q_name, [])
+
+        if not item_list:
             logger.warning(f"No data for {q_name}, using zeros")
             # Create dummy data matching expected shape
             if quarterly_arrays:
@@ -1124,98 +1730,45 @@ def main():
                 h, w = 512, 512  # Default size
             quarter_data = np.zeros((len(bands), h, w), dtype=np.uint16)
         else:
-            logger.info(f"Processing {q_name}: {item.id}")
-            logger.debug(f"  Available assets: {list(item.assets.keys())}")
-            
-            # Get geometry for this scene
-            incidence_angle, look_direction = get_item_geometry(item)
-            
-            # Process each band
-            band_arrays = []
-            for band in bands:
-                logger.debug(f"  Looking for band: {band}")
-                
-                # Check if band exists in assets
-                if band not in item.assets:
-                    logger.warning(f"    Band {band} not found in assets")
-                    # Try alternative naming
-                    found = False
-                    for asset_name in item.assets:
-                        if band in asset_name.lower():
-                            logger.info(f"    Using alternative asset name: {asset_name} for band {band}")
-                            band = asset_name
-                            found = True
-                            break
-                    
-                    if not found:
-                        logger.warning(f"    Could not find {band} in any form, using zeros")
-                        if band_arrays:
-                            shape = band_arrays[0].shape
-                        else:
-                            shape = (512, 512)
-                        band_arrays.append(np.zeros(shape, dtype=np.uint16))
-                        continue
-                
-                # Process the band
-                if band in item.assets:
-                    logger.debug(f"    Processing band {band}")
-                    
-                    # Try to find calibration asset - use the original band name (vv or vh)
-                    cal_asset_name = None
-                    if not args.no_calibration:
-                        cal_asset_name = find_calibration_asset(item, band)
-                    # Try to find thermal noise asset per polarization
-                    noise_asset_name = find_noise_asset(item, band)
-                    
-                    if cal_asset_name and not args.no_calibration:
-                        cal_href = item.assets[cal_asset_name].href
-                        logger.debug(f"    Using calibration from: {cal_asset_name}")
-                    else:
-                        cal_href = None
-                        if not args.no_calibration:
-                            logger.warning(f"    No calibration found for {band}")
-                    if noise_asset_name:
-                        noise_href = item.assets[noise_asset_name].href
-                        logger.debug(f"    Using thermal noise from: {noise_asset_name}")
-                    else:
-                        noise_href = None
-                    
-                    if dem_data is not None and not args.no_terrain_correction and cal_href:
-                        # Full processing with calibration and terrain correction
-                        arr = process_band_with_terrain_correction(
-                            item.assets[band].href,
-                            cal_href,
-                            noise_href,
-                            bounds,
-                            target_crs,
-                            dem_data, dem_transform, dem_crs,
-                            slope, aspect,
-                            incidence_angle, look_direction,
-                            aws_session
-                        )
-                    else:
-                        # Simple processing
-                        arr = process_band_simple(
-                            item.assets[band].href,
-                            bounds,
-                            target_crs,
-                            aws_session
-                        )
-                    
-                    band_arrays.append(arr)
+            logger.info(f"Processing {q_name}: {len(item_list)} scene(s)")
+
+            # Process each scene in this quarter
+            scene_arrays = []
+            for idx, item in enumerate(item_list):
+                logger.info(f"  Processing scene {idx+1}/{len(item_list)}: {item.id}")
+                logger.debug(f"    Available assets: {list(item.assets.keys())}")
+
+                scene_data = process_single_item(
+                    item, bands, bounds, target_crs,
+                    dem_data, dem_transform, dem_crs, slope, aspect,
+                    aws_session, args.no_calibration, args.no_terrain_correction,
+                    simplified_incidence=args.simplified_incidence,
+                )
+
+                if scene_data is not None:
+                    scene_arrays.append(scene_data)
+                    logger.debug(f"    Scene data shape: {scene_data.shape}, range: {scene_data.min()} to {scene_data.max()}")
+
+            # Composite multiple scenes if we have more than one
+            if scene_arrays:
+                if len(scene_arrays) > 1:
+                    # Ensure all arrays have the same shape
+                    max_h = max(a.shape[1] for a in scene_arrays)
+                    max_w = max(a.shape[2] for a in scene_arrays)
+                    padded_arrays = []
+                    for arr in scene_arrays:
+                        if arr.shape[1] < max_h or arr.shape[2] < max_w:
+                            pad_h = max_h - arr.shape[1]
+                            pad_w = max_w - arr.shape[2]
+                            arr = np.pad(arr, ((0, 0), (0, pad_h), (0, pad_w)), mode='edge')
+                        padded_arrays.append(arr)
+                    quarter_data = composite_quarter_scenes(padded_arrays, method='median')
+                    logger.info(f"  Composited {len(scene_arrays)} scenes for {q_name}")
                 else:
-                    logger.warning(f"    Band {band} not available")
-                    if band_arrays:
-                        shape = band_arrays[0].shape
-                    else:
-                        shape = (512, 512)
-                    band_arrays.append(np.zeros(shape, dtype=np.uint16))
-            
-            if band_arrays:
-                quarter_data = np.stack(band_arrays, axis=0)
+                    quarter_data = scene_arrays[0]
                 logger.debug(f"  Quarter data shape: {quarter_data.shape}, range: {quarter_data.min()} to {quarter_data.max()}")
             else:
-                logger.error(f"  No bands processed for {q_name}")
+                logger.error(f"  No scenes processed for {q_name}")
                 quarter_data = np.zeros((len(bands), 512, 512), dtype=np.uint16)
         
         # Compute per-band stats for this quarter
@@ -1308,6 +1861,8 @@ def main():
             lines.append(f"bounds: {bounds}")
             lines.append(f"items_found: {len(items)}")
             lines.append(f"coverage_threshold: {args.coverage_threshold}")
+            lines.append(f"orbit_direction: {args.orbit_direction}")
+            lines.append(f"k_scenes: {args.k_scenes}")
             lines.append(f"bands: {bands}")
             lines.append(f"calibration_enabled: {not args.no_calibration}")
             lines.append(f"terrain_correction_enabled: {not args.no_terrain_correction}")
@@ -1318,11 +1873,11 @@ def main():
             lines.append("quarters:")
             for qm in quarter_meta:
                 lines.append(f"  - quarter: {qm['quarter']}")
-                lines.append(f"    selected_id: {qm['selected_id']}")
-                lines.append(f"    selected_datetime: {qm['selected_datetime']}")
+                lines.append(f"    k_selected: {qm['k_selected']}")
+                lines.append(f"    selected_ids: {qm['selected_ids']}")
+                lines.append(f"    selected_datetimes: {qm['selected_datetimes']}")
                 lines.append(f"    orbit: {qm['selected_orbit']}")
-                lines.append(f"    coverage_fraction: {qm['coverage_fraction']:.4f}")
-                lines.append(f"    meets_threshold: {qm['meets_threshold']}")
+                lines.append(f"    coverage_fractions: {qm['coverage_fractions']}")
                 lines.append(f"    candidate_count: {qm['candidate_count']}")
             lines.append(f"output_shape: {list(final_array.shape)}")
             lines.append(f"output_dtype: {str(final_array.dtype)}")
@@ -1389,6 +1944,9 @@ def run(
     no_terrain_correction: bool = False,
     no_calibration: bool = False,
     run_metadata: bool = False,
+    orbit_direction: str = "ASCENDING",
+    k_scenes: int = 3,
+    simplified_incidence: bool = False,
 ) -> dict:
     """
     Programmatic wrapper around the CLI for serverless execution.
@@ -1405,11 +1963,15 @@ def run(
         "--Y_tile", str(Y_tile),
         "--dest", dest,
         "--expansion", str(expansion),
+        "--orbit-direction", orbit_direction,
+        "--k-scenes", str(k_scenes),
     ]
     if no_terrain_correction:
         argv.append("--no-terrain-correction")
     if no_calibration:
         argv.append("--no-calibration")
+    if simplified_incidence:
+        argv.append("--simplified-incidence")
     if debug:
         argv.append("--debug")
     if run_metadata:
@@ -1432,7 +1994,10 @@ def run(
         "dest": dest,
         "no_terrain_correction": bool(no_terrain_correction),
         "no_calibration": bool(no_calibration),
+        "simplified_incidence": bool(simplified_incidence),
         "run_metadata": bool(run_metadata),
+        "orbit_direction": orbit_direction,
+        "k_scenes": k_scenes,
     }
 
 
