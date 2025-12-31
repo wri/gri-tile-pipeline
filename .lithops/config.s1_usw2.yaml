@@ -1,0 +1,21 @@
+lithops:
+  backend: aws_lambda
+  storage: aws_s3
+  log_level: INFO
+
+aws:
+  region: us-west-2
+
+aws_lambda:
+  execution_role: arn:aws:iam::905418285725:role/lambdaLithopsExecutionRole
+  region: us-west-2
+  runtime: 905418285725.dkr.ecr.us-west-2.amazonaws.com/lithops_v361_4we5_ttc-dev/ttc-s1-dev:latest
+  architecture: x86_64
+  namespace: ttc-dev
+  max_workers: 30
+  runtime_memory: 4096
+  user_tags: {name: "wri:project", value: "GRI-ttc"}
+
+aws_s3:
+  region: us-west-2
+  storage_bucket: dev-ttc-lithops-usw2
