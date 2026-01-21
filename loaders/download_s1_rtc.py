@@ -904,7 +904,7 @@ def main() -> dict | None:
     else:
         os.makedirs(args.dest, exist_ok=True)
         store = LocalStore(prefix=args.dest)
-    base_key = f"{args.year}/{args.X_tile}/{args.Y_tile}/raw"
+    base_key = f"{args.year}/raw/{args.X_tile}/{args.Y_tile}/raw"
     s1_dir_key = f"{base_key}/s1"
     misc_key = f"{base_key}/misc"
     fn_s1_key = f"{s1_dir_key}/{args.X_tile}X{args.Y_tile}Y.hkl"
