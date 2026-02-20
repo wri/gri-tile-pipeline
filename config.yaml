@@ -1,0 +1,23 @@
+pipeline:
+  parquet_path: data/tiledb.parquet
+
+lithops:
+  euc1_config: .lithops/config.euc1.yaml
+  usw2_config: .lithops/config.usw2.yaml
+  s1_usw2_config: .lithops/config.s1_usw2.yaml
+  predict_config: .lithops/config.predict_usw2.yaml
+
+download:
+  runtime: ttc-loaders-dev
+  memory_mb: 4096
+  retries: 3
+
+predict:
+  runtime: ttc-predict-dev
+  memory_mb: 8192
+  retries: 2
+  timeout_sec: 600
+
+zonal:
+  tile_bucket: tof-output
+  small_sites_area_thresh: 0.5

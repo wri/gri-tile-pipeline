@@ -49,6 +49,8 @@ import pickle
 from pathlib import Path
 from urllib.parse import urlparse
 
+from loaders.shared import make_bbox, obstore_put_hkl, compute_band_stats
+
 def _elapsed_ms(t_start: float) -> float:
     return (time.perf_counter() - t_start) * 1000.0
 
@@ -80,16 +82,6 @@ def _resolve_cache_dir() -> Path | None:
 
 DEM_CACHE_DIR = _resolve_cache_dir()
 
-# bbox helper (expand a point bbox by ~degrees)
-def make_bbox(initial_bbx: list, expansion: int = 10) -> list:
-    multiplier = 1/360
-    bbx = initial_bbx.copy()
-    bbx[0] -= expansion * multiplier
-    bbx[1] -= expansion * multiplier
-    bbx[2] += expansion * multiplier
-    bbx[3] += expansion * multiplier
-    return bbx
-
 def bbox2geojson(bbox: list) -> dict:
     x1, y1, x2, y2 = bbox
     return {
@@ -113,60 +105,11 @@ def coverage_fraction(item, tile_bounds: tuple) -> float:
         logger.warning(f"Failed computing coverage fraction for item {getattr(item, 'id', 'unknown')}: {e}")
         return 0.0
 
-def obstore_put_hkl(store, relpath: str, obj) -> None:
-    tmp = tempfile.NamedTemporaryFile(suffix=".hkl", delete=False)
-    tmp.close()
-    try:
-        hkl.dump(obj, tmp.name, mode="w", compression="gzip")
-        with open(tmp.name, "rb") as f:
-            obs.put(store, relpath, f.read())
-    finally:
-        try:
-            os.remove(tmp.name)
-        except Exception:
-            pass
-
 def obstore_put_text(store, relpath: str, text: str) -> None:
     try:
         obs.put(store, relpath, text.encode("utf-8"))
     except Exception as e:
         logger.error(f"Failed to write text sidecar {relpath}: {e}")
-
-def compute_band_stats(arr: np.ndarray) -> dict:
-    """Compute summary stats ignoring zeros as nodata.
-
-    Returns dict with min, max, mean, std, p5, p50, p95, valid_ratio, count, valid_count.
-    """
-    vals = arr.astype(np.float32)
-    total = int(vals.size)
-    mask = vals > 0
-    valid = vals[mask]
-    if valid.size == 0:
-        return {
-            "min": 0,
-            "max": 0,
-            "mean": 0.0,
-            "std": 0.0,
-            "p5": 0.0,
-            "p50": 0.0,
-            "p95": 0.0,
-            "valid_ratio": 0.0,
-            "count": total,
-            "valid_count": 0,
-        }
-    p5, p50, p95 = np.percentile(valid, [5, 50, 95])
-    return {
-        "min": int(valid.min()),
-        "max": int(valid.max()),
-        "mean": float(valid.mean()),
-        "std": float(valid.std()),
-        "p5": float(p5),
-        "p50": float(p50),
-        "p95": float(p95),
-        "valid_ratio": float(valid.size / total) if total > 0 else 0.0,
-        "count": total,
-        "valid_count": int(valid.size),
-    }
 
 def ensure_dirs(store, *dirs: str) -> None:
     for d in dirs:
@@ -1508,6 +1451,11 @@ def main():
     else:
         logger.add(sys.stderr, level="INFO")
 
+    _main_impl(args)
+
+
+def _main_impl(args):
+    """Core S1 processing logic, separated from CLI argument parsing."""
     t_all = time.perf_counter()
 
     # AWS + rasterio config
@@ -1931,7 +1879,7 @@ def main():
         except Exception as e:
             logger.error(f"Failed to write metadata sidecar: {e}")
 
-# --- programmatic entrypoint for Lithops ---
+# --- programmatic entrypoint for Lithops / local ---
 def run(
     year: int | str,
     lon: float,
@@ -1948,41 +1896,27 @@ def run(
     k_scenes: int = 3,
     simplified_incidence: bool = False,
 ) -> dict:
-    """
-    Programmatic wrapper around the CLI for serverless execution.
-    Synthesizes argv for argparse-based main().
-    """
-    import sys
+    """Programmatic entry-point for Lithops and local execution."""
+    import argparse as _argparse
 
-    argv = [
-        __file__,
-        "--year", str(year),
-        "--lon", str(lon),
-        "--lat", str(lat),
-        "--X_tile", str(X_tile),
-        "--Y_tile", str(Y_tile),
-        "--dest", dest,
-        "--expansion", str(expansion),
-        "--orbit-direction", orbit_direction,
-        "--k-scenes", str(k_scenes),
-    ]
-    if no_terrain_correction:
-        argv.append("--no-terrain-correction")
-    if no_calibration:
-        argv.append("--no-calibration")
-    if simplified_incidence:
-        argv.append("--simplified-incidence")
-    if debug:
-        argv.append("--debug")
-    if run_metadata:
-        argv.append("--run-metadata")
-
-    old_argv = sys.argv
-    try:
-        sys.argv = argv
-        main()
-    finally:
-        sys.argv = old_argv
+    args = _argparse.Namespace(
+        year=int(year),
+        lon=float(lon),
+        lat=float(lat),
+        X_tile=int(X_tile),
+        Y_tile=int(Y_tile),
+        dest=dest,
+        expansion=int(expansion),
+        debug=bool(debug),
+        no_terrain_correction=bool(no_terrain_correction),
+        no_calibration=bool(no_calibration),
+        run_metadata=bool(run_metadata),
+        orbit_direction=orbit_direction,
+        k_scenes=int(k_scenes),
+        simplified_incidence=bool(simplified_incidence),
+        coverage_threshold=0.95,
+    )
+    _main_impl(args)
 
     return {
         "product": "s1",
