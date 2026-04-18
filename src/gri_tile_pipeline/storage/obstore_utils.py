@@ -10,13 +10,22 @@ import obstore as obs
 from obstore.store import LocalStore, from_url
 
 
-def from_dest(dest: str, *, region: str = "us-west-2"):
+def from_dest(dest: str, *, region: str = "us-east-1", profile: str | None = None):
     """Build an obstore Store from an ``s3://`` URI or local path.
 
-    This mirrors the pattern used across all four loaders.
+    Uses Boto3CredentialProvider for S3 to inherit AWS credential chain
+    (profiles, env vars, SSO, etc.).
     """
     if dest.startswith("s3://"):
-        return from_url(dest, region=region)
+        import boto3
+        from obstore.auth.boto3 import Boto3CredentialProvider
+        from obstore.store import S3Store
+
+        session = boto3.Session(profile_name=profile)
+        credential_provider = Boto3CredentialProvider(session)
+        # Extract bucket name from s3://bucket/prefix
+        bucket = dest.replace("s3://", "").split("/")[0]
+        return S3Store(bucket, region=region, credential_provider=credential_provider)
     os.makedirs(dest, exist_ok=True)
     return LocalStore(prefix=dest)
 

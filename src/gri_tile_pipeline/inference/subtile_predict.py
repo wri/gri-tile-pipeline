@@ -114,6 +114,12 @@ def make_windows(
     tiles_array[:, 2] = np.minimum(tiles_array[:, 0] + tiles_array[:, 2], height) - tiles_array[:, 0]
     tiles_array[:, 3] = np.minimum(tiles_array[:, 1] + tiles_array[:, 3], width) - tiles_array[:, 1]
 
+    # First-position tiles: only expand forward (match reference make_overlapping_windows)
+    first_x = tiles_folder[:, 0] == 0
+    first_y = tiles_folder[:, 1] == 0
+    tiles_array[first_x, 2] = np.minimum(tiles_array[first_x, 2], tile_size + margin)
+    tiles_array[first_y, 3] = np.minimum(tiles_array[first_y, 3], tile_size + margin)
+
     return tiles_folder, tiles_array
 
 
@@ -162,6 +168,7 @@ def mosaic_predictions(
     tile_size: int = SIZE,
     length: int = 4,
     gauss_sigma: int = 36,
+    interp: np.ndarray | None = None,
 ) -> np.ndarray:
     """Run prediction on overlapping subtiles and mosaic with Gaussian blending.
 
@@ -220,12 +227,85 @@ def mosaic_predictions(
         subtile_norm = normalize_subtile(subtile)
         pred = predict_subtile(subtile_norm, predict_session, tile_size, length)
 
+        # Per-subtile nodata masking (reference lines 1570-1592)
+        # Use interp mask to detect regions with no clear images, then apply
+        # block-based thresholding to set those regions to nodata (255).
+        if interp is not None and not np.all(pred == 255):
+            from scipy.ndimage import binary_dilation, generate_binary_structure
+            # interp has shape (T_interp, H_full, W_full) — crop to expanded window
+            interp_tile = interp[:, start_x:start_x + ww, start_y:start_y + wh]
+            min_clear = np.sum(interp_tile < 0.33, axis=0)
+            # Crop border (6 pixels each side, matching reference [6:-6, 6:-6])
+            if min_clear.shape[0] > 12 and min_clear.shape[1] > 12:
+                mc_crop = min_clear[6:-6, 6:-6]
+                no_images = mc_crop < 1
+                struct2 = generate_binary_structure(2, 2)
+                no_images = 1 - binary_dilation(1 - no_images, structure=struct2, iterations=6)
+                no_images = binary_dilation(no_images, structure=struct2, iterations=6)
+                # Block-based thresholding for SIZE=158: reshape to (4, 40, 4, 40)
+                ch, cw = no_images.shape
+                if ch == 160 and cw == 160:
+                    no_images = no_images.reshape(4, 40, 4, 40)
+                    no_images = np.sum(no_images, axis=(1, 3))
+                    no_images = no_images > (40 * 40) * 0.25
+                    no_images = no_images.repeat(40, axis=0).repeat(40, axis=1)
+                    no_images = no_images[1:-1, 1:-1]  # 160→158
+                    pred[no_images] = 255.0
+
         # Apply bright surface attenuation (reference line 1600)
         if not np.all(pred == 255):
             pred = pred * bright_attn
 
         pred = np.around(pred, 3).astype(np.float32)
         subtile_preds.append(pred)
+
+    # Phase 1.5: Overlap calibration (reference calc_overlap + load_mosaic_predictions)
+    # Build a 3D predictions array (H, W, n_windows) with NaN fill, then compute
+    # per-subtile agreement metrics to weight subtiles by consistency.
+    multipliers = np.ones(n_windows, dtype=np.float64)
+    try:
+        pred_3d = np.full((H, W, n_windows), np.nan, dtype=np.float64)
+        for i in range(n_windows):
+            folder = tiles_folder[i]
+            fx, fy = int(folder[0]), int(folder[1])
+            pred = subtile_preds[i]
+            if np.all(pred == 255):
+                continue
+            ph, pw = pred.shape
+            vals = pred[:ph, :pw].astype(np.float64) * 100
+            vals[pred[:ph, :pw] > 1.0] = np.nan
+            pred_3d[fx:fx + ph, fy:fy + pw, i] = vals
+
+        ratios = np.zeros(n_windows, dtype=np.float64)
+        for i in range(n_windows):
+            subtile_slice = pred_3d[..., i]
+            others = np.delete(pred_3d, i, axis=-1)
+            valid_mask = ~np.isnan(subtile_slice)
+            if valid_mask.sum() == 0:
+                ratios[i] = np.nan
+                continue
+            sub_vals = subtile_slice[valid_mask]
+            oth_vals = others[valid_mask]  # (n_valid, n_windows-1)
+            # Remove channels that are entirely NaN
+            col_valid = np.sum(~np.isnan(oth_vals), axis=0) > 0
+            if col_valid.sum() == 0:
+                ratios[i] = np.nan
+                continue
+            oth_vals = oth_vals[:, col_valid]
+            oth_mean = np.nanmean(oth_vals, axis=1)
+            ratios[i] = np.nanmean(np.abs(oth_mean - sub_vals))
+
+        valid_ratios = ratios[~np.isnan(ratios)]
+        if len(valid_ratios) > 0 and np.all(valid_ratios > 0):
+            med = np.median(valid_ratios)
+            for i in range(n_windows):
+                if not np.isnan(ratios[i]) and ratios[i] > 0:
+                    multipliers[i] = med / ratios[i]
+            multipliers[multipliers > 1.5] = 1.5
+            logger.debug(f"Overlap calibration: multipliers range [{multipliers.min():.3f}, {multipliers.max():.3f}]")
+    except Exception:
+        logger.warning("Skipping overlap calibration due to error")
+        multipliers = np.ones(n_windows, dtype=np.float64)
 
     # Phase 2: Gaussian-weighted mosaic (reference load_mosaic_predictions)
     accum = np.zeros((H, W), dtype=np.float64)
@@ -244,6 +324,8 @@ def mosaic_predictions(
         g = gauss[:ph, :pw].copy()
         # Exclude nodata from blending
         g[pred > 1.0] = 0.0
+        # Apply overlap calibration multiplier
+        g *= multipliers[i]
 
         accum[folder_x:folder_x + ph, folder_y:folder_y + pw] += pred * 100 * g
         weight_map[folder_x:folder_x + ph, folder_y:folder_y + pw] += g

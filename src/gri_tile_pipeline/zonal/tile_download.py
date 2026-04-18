@@ -16,7 +16,6 @@ from loguru import logger
 from shapely.geometry import box, shape
 
 import obstore as obs
-from obstore.store import from_url
 
 from gri_tile_pipeline.storage.tile_paths import prediction_key
 
@@ -25,6 +24,36 @@ def _load_polygons(path: str):
     """Load polygon geometries from GeoJSON/GeoPackage/Shapefile."""
     import geopandas as gpd
     return gpd.read_file(path)
+
+
+def load_tile_lookup(
+    parquet_path: str | None = None,
+    lookup_csv: str | None = None,
+) -> pd.DataFrame:
+    """Load tile lookup table from parquet or CSV.
+
+    The lookup table must have columns: X, Y, X_tile, Y_tile.
+
+    Args:
+        parquet_path: Path to tiledb.parquet (preferred).
+        lookup_csv: Path to CSV fallback.
+
+    Returns:
+        DataFrame with tile coordinates.
+    """
+    if parquet_path and os.path.exists(parquet_path):
+        import duckdb
+        df = duckdb.sql(f"SELECT X, Y, X_tile, Y_tile FROM '{parquet_path}'").df()
+        logger.info(f"Loaded tile lookup from {parquet_path}: {len(df)} tiles")
+        return df
+    elif lookup_csv and os.path.exists(lookup_csv):
+        df = pd.read_csv(lookup_csv)
+        logger.info(f"Loaded tile lookup from {lookup_csv}: {len(df)} tiles")
+        return df
+    else:
+        raise FileNotFoundError(
+            f"Tile lookup not found. Tried parquet={parquet_path}, csv={lookup_csv}"
+        )
 
 
 def pre_filter_tiles(
@@ -73,23 +102,30 @@ def pre_filter_tiles(
 
 
 def download_prediction_tiles(
-    polygons_path: str,
+    polygons_path: str | None,
     tile_bucket: str,
     year: int,
     *,
+    tiles_df: pd.DataFrame | None = None,
     global_lookup: pd.DataFrame | None = None,
+    lookup_parquet: str | None = None,
     lookup_csv: str | None = None,
     temp_dir: str | None = None,
-    region: str = "us-west-2",
+    region: str = "us-east-1",
 ) -> List[str]:
     """Download the prediction tiles that overlap the input polygons.
 
     Args:
-        polygons_path: Path to polygon file (GeoJSON/GPKG/SHP).
+        polygons_path: Path to polygon file (GeoJSON/GPKG/SHP).  Can be
+            ``None`` when *tiles_df* is provided.
         tile_bucket: S3 bucket containing prediction tiles.
         year: Year to fetch tiles for.
+        tiles_df: Pre-computed tile DataFrame with columns
+            ``X_tile, Y_tile, X, Y``.  When provided, the polygon
+            intersection step is skipped entirely.
         global_lookup: Pre-loaded tile lookup DataFrame. If None, loads from
-            *lookup_csv*.
+            *lookup_parquet* or *lookup_csv*.
+        lookup_parquet: Path to tiledb.parquet (preferred over CSV).
         lookup_csv: Path to tile lookup CSV (fallback).
         temp_dir: Directory to store downloaded tiles.
         region: AWS region.
@@ -97,37 +133,44 @@ def download_prediction_tiles(
     Returns:
         List of local file paths to downloaded GeoTIFFs.
     """
-    import geopandas as gpd
+    if tiles_df is not None:
+        # Tiles already identified (e.g. by spatial clustering step)
+        tiles_dedup = tiles_df.drop_duplicates(subset=["X_tile", "Y_tile"])
+    else:
+        import geopandas as gpd
 
-    gdf = gpd.read_file(polygons_path)
+        gdf = gpd.read_file(polygons_path)
 
-    if global_lookup is None:
-        if lookup_csv is not None:
-            global_lookup = pd.read_csv(lookup_csv)
-        else:
-            raise ValueError("Provide either global_lookup or lookup_csv")
+        if global_lookup is None:
+            global_lookup = load_tile_lookup(
+                parquet_path=lookup_parquet, lookup_csv=lookup_csv
+            )
 
-    # Collect tiles across all polygons
-    all_tiles: List[pd.Series] = []
-    for _, row in gdf.iterrows():
-        pf = pre_filter_tiles(row.geometry, global_lookup)
-        for _, tile_row in pf.iterrows():
-            all_tiles.append(tile_row)
+        # Collect tiles across all polygons
+        all_tiles: List[pd.Series] = []
+        for _, row in gdf.iterrows():
+            pf = pre_filter_tiles(row.geometry, global_lookup)
+            for _, tile_row in pf.iterrows():
+                all_tiles.append(tile_row)
 
-    if not all_tiles:
-        logger.warning("No tiles intersect the input polygons")
-        return []
+        if not all_tiles:
+            logger.warning("No tiles intersect the input polygons")
+            return []
 
-    tiles_df = pd.DataFrame(all_tiles).drop_duplicates(subset=["X_tile", "Y_tile"])
-    logger.info(f"Downloading {len(tiles_df)} prediction tiles for year {year}")
+        tiles_dedup = pd.DataFrame(all_tiles).drop_duplicates(subset=["X_tile", "Y_tile"])
+    logger.info(f"Downloading {len(tiles_dedup)} prediction tiles for year {year}")
 
-    store = from_url(f"s3://{tile_bucket}", region=region)
+    from gri_tile_pipeline.storage.obstore_utils import from_dest
+    if tile_bucket.startswith(("s3://", "/", ".")):
+        store = from_dest(tile_bucket, region=region)
+    else:
+        store = from_dest(f"s3://{tile_bucket}", region=region)
     if temp_dir is None:
         temp_dir = tempfile.mkdtemp(prefix="ttc_tiles_")
     os.makedirs(temp_dir, exist_ok=True)
 
     local_paths: List[str] = []
-    for _, tile in tiles_df.iterrows():
+    for _, tile in tiles_dedup.iterrows():
         x = int(tile["X_tile"])
         y = int(tile["Y_tile"])
         key = prediction_key(year, x, y)
@@ -141,5 +184,5 @@ def download_prediction_tiles(
         except Exception as e:
             logger.warning(f"Failed to download {key}: {e}")
 
-    logger.info(f"Downloaded {len(local_paths)}/{len(tiles_df)} tiles")
+    logger.info(f"Downloaded {len(local_paths)}/{len(tiles_dedup)} tiles")
     return local_paths

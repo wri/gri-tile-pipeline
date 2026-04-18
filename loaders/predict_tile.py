@@ -116,8 +116,16 @@ def _write_geotiff_local(path: str, arr: np.ndarray, lon: float, lat: float):
 
 
 def _fill_zeros_with_temporal_median(arr: np.ndarray) -> np.ndarray:
-    """Replace zero values with temporal median (reference helper)."""
-    median = np.median(arr, axis=0)
+    """Replace zero values with non-zero temporal median (reference helper).
+
+    Matches reference fill_zeros_with_temporal_median: uses nanmedian
+    after converting zeros to NaN, so the replacement median excludes
+    zero values from the computation.
+    """
+    xf = arr.astype(np.float32, copy=False)
+    xf_nz = np.where(xf == 0, np.nan, xf)
+    median = np.nanmedian(xf_nz, axis=0)
+    median = np.where(np.isnan(median), 0.0, median)
     for t in range(arr.shape[0]):
         zero_mask = arr[t] == 0
         if np.any(zero_mask):
@@ -133,8 +141,12 @@ def predict_tile_from_arrays(
     clouds: np.ndarray,
     s2_dates: np.ndarray,
     model_path: str,
+    clm: Optional[np.ndarray] = None,
     length: int = 4,
     enable_cloud_removal: bool = True,
+    diagnostics: Optional[Dict] = None,
+    intermediates: Optional[Dict] = None,
+    seed: Optional[int] = None,
 ) -> np.ndarray:
     """Run the full prediction pipeline on pre-loaded arrays.
 
@@ -150,6 +162,7 @@ def predict_tile_from_arrays(
         model_path: path to directory containing predict_graph-172.pb
         length: temporal sequence length (4 = quarterly, default)
         enable_cloud_removal: run multi-temporal cloud removal (default True)
+        diagnostics: if provided, intermediate outputs are stored into this dict
 
     Returns:
         (H, W) uint8 prediction [0-100], 255=nodata
@@ -178,6 +191,10 @@ def predict_tile_from_arrays(
         s2_10 = s2_10.astype(np.float32) / 65535.0
     if s2_20.dtype == np.uint16:
         s2_20 = s2_20.astype(np.float32) / 65535.0
+    # Reference code only uses first 6 of the 20m bands (B05, B06, B07, B8A, B11, B12).
+    # Some datasets include a 7th band (e.g. B09 at 60m) — discard it.
+    if s2_20.shape[-1] > 6:
+        s2_20 = s2_20[..., :6]
     if s1.dtype == np.uint16:
         s1 = s1.astype(np.float32) / 65535.0
 
@@ -207,6 +224,21 @@ def predict_tile_from_arrays(
     # which needs raw meters for elevation thresholds (e.g. dem >= 25m).
 
     # ------------------------------------------------------------------
+    # 1b. CLM preprocessing (reference lines 769-778)
+    # ------------------------------------------------------------------
+    if clm is not None:
+        clm = clm.astype(np.float32)
+        # Upsample 20m → 10m by nearest-neighbor repeat
+        clm = clm.repeat(2, axis=1).repeat(2, axis=2)
+        # Suppress Sen2Cor false positives: if 2 consecutive frames are cloudy, set to 0
+        for i in range(clm.shape[0]):
+            mins = max(i - 1, 0)
+            maxs = min(i + 1, clm.shape[0])
+            sums = np.sum(clm[mins:maxs], axis=0) == 2
+            clm[mins:maxs, sums] = 0.0
+        logger.info(f"CLM cloud %: {np.mean(clm, axis=(1, 2))}")
+
+    # ------------------------------------------------------------------
     # 2. Align spatial dimensions: target = 2 × s2_20 shape (reference lines 800-806)
     # ------------------------------------------------------------------
     T = s2_10.shape[0]
@@ -227,19 +259,65 @@ def predict_tile_from_arrays(
         s2_10 = s2_10_r
 
     # Upsample 20m bands to target dims
+    # Bands 0-3 (B05, B06, B07, B8A) — simple bilinear upsample
+    # Bands 4-5 (B11, B12 / SWIR) — "40m" bands: reference code applies 2×2 block-average
+    #   before upsampling to match how these bands were originally at coarser resolution
+    #   (reference lines 831-869)
     s2_20_up = np.zeros((T, H, W, s2_20.shape[-1]), dtype=np.float32)
+    h20, w20 = s2_20.shape[1], s2_20.shape[2]
     for t in range(T):
-        for b in range(s2_20.shape[-1]):
+        # Bands 0-3: standard bilinear
+        for b in range(min(4, s2_20.shape[-1])):
             s2_20_up[t, :, :, b] = sk_resize(
                 s2_20[t, :, :, b], (H, W), order=1, preserve_range=True
             )
+        # Bands 4-5: 40m-aware upsampling (reference lines 831-869)
+        for b in range(4, min(6, s2_20.shape[-1])):
+            mid = s2_20[t, :, :, b]
+            if h20 % 2 == 0 and w20 % 2 == 0:
+                mid = mid.reshape(h20 // 2, 2, w20 // 2, 2).mean(axis=(1, 3))
+                s2_20_up[t, :, :, b] = sk_resize(
+                    mid, (H, W), order=1, preserve_range=True
+                )
+            elif h20 % 2 != 0 and w20 % 2 != 0:
+                row0 = mid[0, :]
+                col0 = mid[:, 0]
+                inner = mid[1:, 1:].reshape(
+                    (h20 - 1) // 2, 2, (w20 - 1) // 2, 2
+                ).mean(axis=(1, 3))
+                s2_20_up[t, 1:, 1:, b] = sk_resize(
+                    inner, (H - 1, W - 1), order=1, preserve_range=True
+                )
+                s2_20_up[t, 0, :, b] = np.repeat(row0, 2)[:W]
+                s2_20_up[t, :, 0, b] = np.repeat(col0, 2)[:H]
+            elif h20 % 2 != 0:
+                row0 = mid[0, :]
+                inner = mid[1:].reshape(
+                    (h20 - 1) // 2, 2, w20 // 2, 2
+                ).mean(axis=(1, 3))
+                s2_20_up[t, 1:, :, b] = sk_resize(
+                    inner, (H - 1, W), order=1, preserve_range=True
+                )
+                s2_20_up[t, 0, :, b] = np.repeat(row0, 2)[:W]
+            else:  # w20 % 2 != 0
+                col0 = mid[:, 0]
+                inner = mid[:, 1:].reshape(
+                    h20 // 2, 2, (w20 - 1) // 2, 2
+                ).mean(axis=(1, 3))
+                s2_20_up[t, :, 1:, b] = sk_resize(
+                    inner, (H, W - 1), order=1, preserve_range=True
+                )
+                s2_20_up[t, :, 0, b] = np.repeat(col0, 2)[:H]
 
     # Merge into 10-band array: [B2,B3,B4,B8, B5,B6,B7,B8A,B11,B12]
     s2_full = np.concatenate([s2_10, s2_20_up], axis=-1)
 
+    if diagnostics is not None:
+        diagnostics["s2_full_shape_post_merge"] = s2_full.shape
+        diagnostics["s2_full_band_means_post_merge"] = s2_full.mean(axis=(0, 1, 2)).tolist()
+
     # Resize DEM to match
-    if dem.shape[0] != H or dem.shape[1] != W:
-        dem = sk_resize(dem, (H, W), order=1, preserve_range=True).astype(np.float32)
+    dem = sk_resize(dem, (H, W), order=1, preserve_range=True).astype(np.float32)
 
     # Super-resolution (CNN-based if model file available, else bilinear fallback)
     try:
@@ -256,36 +334,77 @@ def predict_tile_from_arrays(
         logger.warning("superresolve_graph.pb not found — using bilinear upsampling only")
         s2_full = superresolve_tile(s2_full, sess=None)
 
+    if intermediates is not None:
+        intermediates["s2_post_superres"] = s2_full.copy()
+
     # ------------------------------------------------------------------
-    # 3. Cloud removal pipeline
+    # 3. Remove bad timesteps, handle missing values (BEFORE cloud removal)
+    #    Reference: id_missing_px + interpolate_missing_vals run before
+    #    identify_clouds_shadows (lines 873-922 in process_tile)
     # ------------------------------------------------------------------
+    missing = id_missing_px(s2_full)
+    if len(missing) > 0:
+        s2_full = np.delete(s2_full, missing, axis=0)
+        s2_dates = np.delete(s2_dates, missing)
+        logger.info(f"Removed {len(missing)} bad timesteps, {s2_full.shape[0]} remain")
+
+    # Fill any NaN values with temporal median
+    s2_full = interpolate_na_vals(s2_full)
+
+    # ------------------------------------------------------------------
+    # 4. Cloud removal pipeline
+    # ------------------------------------------------------------------
+    interp_mask = None  # Will be set if cloud removal runs
     if enable_cloud_removal and s2_full.shape[0] >= 3:
         # identify_clouds_shadows needs raw DEM in meters
         dem_raw = dem  # dem is still in meters at this point
         cloud_probs, fcps = identify_clouds_shadows(s2_full, dem_raw)
 
+        # Merge CLM after cloud detection (reference lines 929-934)
+        # Note: reference tries clm[fcps]=0 but this always raises IndexError
+        # (float array indexing), caught by try/except — so fcps filtering is
+        # never actually applied. We match that behavior.
+        if clm is not None:
+            clm_use = clm[:s2_full.shape[0], :H, :W]
+            cloud_probs = np.maximum(cloud_probs, clm_use)
+
+        if intermediates is not None:
+            intermediates["cloud_probs_initial"] = cloud_probs.copy()
+
         # Build soft interpolation masks
         interp_mask = id_areas_to_interp(cloud_probs)
 
         # Iterative pruning: remove images with >90% interp (up to 3 rounds)
+        # Re-run cloud detection after each pruning round because the algorithm
+        # is multi-temporal — removing heavily cloudy images improves detection
+        # for remaining images (matching reference process_tile behavior).
         for _round in range(3):
-            pct_interp = np.mean(interp_mask > 0.5, axis=(1, 2))
+            pct_interp = np.mean(interp_mask > 0, axis=(1, 2))
             to_drop = np.argwhere(pct_interp > 0.90).flatten()
             if len(to_drop) == 0 or s2_full.shape[0] - len(to_drop) < 3:
                 break
             logger.info(f"Cloud pruning round {_round + 1}: dropping {len(to_drop)} images")
             keep = np.setdiff1d(np.arange(s2_full.shape[0]), to_drop)
             s2_full = s2_full[keep]
-            cloud_probs = cloud_probs[keep]
-            interp_mask = interp_mask[keep]
-            fcps = fcps[keep]
             s2_dates = s2_dates[keep]
-            # Recompute interp mask after pruning
+            # Also prune CLM to match
+            if clm is not None:
+                clm = np.delete(clm, to_drop, axis=0)
+            # Re-detect clouds on reduced image stack
+            cloud_probs, fcps = identify_clouds_shadows(s2_full, dem_raw)
+            # Re-merge CLM after re-detection (reference lines 959-965)
+            if clm is not None:
+                clm_use = clm[:s2_full.shape[0], :H, :W]
+                cloud_probs = np.maximum(cloud_probs, clm_use)
             interp_mask = id_areas_to_interp(cloud_probs)
+
+        if intermediates is not None:
+            intermediates["cloud_probs_final"] = cloud_probs.copy()
+            intermediates["interp_mask"] = interp_mask.copy()
 
         # Temporal interpolation: blend cloudy areas with cloud-free mosaic
         s2_full, _interp_out, cloud_to_remove = remove_cloud_and_shadows(
-            s2_full, cloud_probs, fcps,
+            s2_full, cloud_probs, fcps, seed=seed,
         )
         if cloud_to_remove:
             unique_remove = sorted(set(cloud_to_remove))
@@ -298,44 +417,78 @@ def predict_tile_from_arrays(
     elif enable_cloud_removal:
         logger.warning("Too few images for cloud removal (<3), skipping")
 
+    if diagnostics is not None:
+        diagnostics["n_timesteps_after_cloud"] = s2_full.shape[0]
+
+    if intermediates is not None:
+        intermediates["s2_post_cloud"] = s2_full.copy()
+
     # Normalize DEM: reference line 1084 divides by 90 (meters → ~[0, 0.5])
     dem = dem / 90.0
 
-    # ------------------------------------------------------------------
-    # 4. Remove bad timesteps, handle missing values
-    # ------------------------------------------------------------------
-    missing = id_missing_px(s2_full)
-    if len(missing) > 0:
-        s2_full = np.delete(s2_full, missing, axis=0)
-        logger.info(f"Removed {len(missing)} bad timesteps, {s2_full.shape[0]} remain")
+    # Clip S2 to [0, 1] BEFORE zero/one replacement (reference line 1085)
+    s2_full = np.clip(s2_full, 0, 1)
 
-    # Fill any NaN values with temporal median
+    # Second NaN fill on clipped data (reference line 1266)
     s2_full = interpolate_na_vals(s2_full)
 
+    # ------------------------------------------------------------------
+    # Compute median composite from pre-Whittaker data (reference lines 1269-1277)
+    # This median is used for the 5th frame of the feature stack.
+    # Reference computes it BEFORE deal_w_missing_px, from all post-cloud timesteps.
+    # ------------------------------------------------------------------
+    s2_median_raw = np.median(s2_full, axis=0).astype(np.float32)  # (H, W, 10)
+    indices_from_raw = make_indices(s2_full)  # (T, H, W, 4)
+    indices_median_raw = np.median(indices_from_raw, axis=0).astype(np.float32)  # (H, W, 4)
+
+    # ------------------------------------------------------------------
+    # deal_w_missing_px equivalent (reference lines 1148-1171)
+    # Stricter missing pixel removal (threshold=10 vs initial 11)
+    # ------------------------------------------------------------------
+    missing_strict = id_missing_px(s2_full, 10)
+    if len(missing_strict) > 0:
+        s2_full = np.delete(s2_full, missing_strict, axis=0)
+        s2_dates = np.delete(s2_dates, missing_strict)
+        logger.info(f"Post-cloud id_missing_px(10): removed {len(missing_strict)} images, "
+                     f"{s2_full.shape[0]} remain")
+
     # Replace zero and 1.0 values with temporal median (reference lines 1156-1164)
-    median_vals = np.median(s2_full, axis=0)
-    for i in range(s2_full.shape[0]):
-        zero_mask = s2_full[i] == 0
-        if np.any(zero_mask):
-            s2_full[i][zero_mask] = median_vals[zero_mask]
-        one_mask = s2_full[i] == 1
-        if np.any(one_mask):
-            s2_full[i][one_mask] = median_vals[one_mask]
+    # Reference recomputes np.median(arr, axis=0) inside the loop (cascading updates)
+    if np.sum(s2_full == 0) > 0:
+        for i in range(s2_full.shape[0]):
+            arr_i = s2_full[i]
+            zero_mask = arr_i == 0
+            if np.any(zero_mask):
+                arr_i[zero_mask] = np.median(s2_full, axis=0)[zero_mask]
+    if np.sum(s2_full == 1) > 0:
+        for i in range(s2_full.shape[0]):
+            arr_i = s2_full[i]
+            one_mask = arr_i == 1
+            if np.any(one_mask):
+                arr_i[one_mask] = np.median(s2_full, axis=0)[one_mask]
 
-    s2_full = np.clip(s2_full, 0, 1)  # reference line 1085
+    # Remove timesteps with NaN values (reference lines 1165-1170)
+    nan_timesteps = np.argwhere(
+        np.sum(np.isnan(s2_full), axis=(1, 2, 3)) > 0
+    ).flatten()
+    if len(nan_timesteps) > 0:
+        s2_full = np.delete(s2_full, nan_timesteps, axis=0)
+        s2_dates = np.delete(s2_dates, nan_timesteps)
+        logger.info(f"Removed {len(nan_timesteps)} NaN timesteps, {s2_full.shape[0]} remain")
 
     # ------------------------------------------------------------------
-    # 4. Resample to 24 biweekly composites (reference: calculate_and_save_best_images)
-    #    This ensures enough timesteps for Whittaker smoothing (24→12)
+    # 4. Compute indices from raw post-deal_w_missing_px data, THEN resample
+    #    Reference: make_and_smooth_indices computes indices from raw irregular
+    #    timesteps, then resamples to 24 biweekly, then Whittaker smooths.
+    #    Indices are nonlinear (EVI, MSAVI2) so order matters:
+    #    f(resample(x)) != resample(f(x))
     # ------------------------------------------------------------------
+    indices_irregular = make_indices(s2_full)  # (T_irregular, H, W, 4)
+
+    # Resample both S2 and indices to 24 biweekly composites
     s2_full_24, max_gap = resample_to_biweekly(s2_full, s2_dates)
+    indices_raw, _ = resample_to_biweekly(indices_irregular, s2_dates)  # (24, H, W, 4)
     logger.info(f"Resampled to {s2_full_24.shape[0]} biweekly composites (max gap: {max_gap}d)")
-
-    # ------------------------------------------------------------------
-    # 5. Compute vegetation indices BEFORE Whittaker smoothing
-    #    (reference: indices are computed from resampled S2, then smoothed separately)
-    # ------------------------------------------------------------------
-    indices_raw = make_indices(s2_full_24)  # (24, H, W, 4)
 
     # Smooth indices separately (reference: lmbd=100, size=24, outsize=12)
     sm_indices = WhittakerSmoother(
@@ -362,19 +515,59 @@ def predict_tile_from_arrays(
     )
     s2_12 = smoother.interpolate_array(s2_full_24)  # (12, H, W, 10)
 
+    if diagnostics is not None:
+        diagnostics["s2_12_band_means"] = s2_12.mean(axis=(0, 1, 2)).tolist()
+        diagnostics["indices_12_band_means"] = indices_12.mean(axis=(0, 1, 2)).tolist()
+
     # ------------------------------------------------------------------
     # 7. Prepare S1: resize to match spatial dims, take first 12 frames
     # ------------------------------------------------------------------
-    if s1.shape[1] != H or s1.shape[2] != W:
-        s1_resized = np.zeros((min(s1.shape[0], 12), H, W, 2), dtype=np.float32)
-        for t in range(s1_resized.shape[0]):
-            for b in range(2):
-                s1_resized[t, :, :, b] = sk_resize(
-                    s1[t, :, :, b], (H, W), order=1, preserve_range=True
-                )
-        s1_use = s1_resized
-    else:
-        s1_use = s1[:12].astype(np.float32) if s1.ndim == 4 else s1[:12, :, :, np.newaxis]
+    # Reference uses pad/crop (not bilinear resize) for S1 alignment:
+    # 1. adjust_shape: edge-pad short dims, crop oversized dims
+    # 2. pad_crop_to_hw: center-aligned final pad/crop with constant 0
+    s1_use = s1[:12].astype(np.float32) if s1.ndim == 4 else s1[:12, :, :, np.newaxis]
+    if s1_use.shape[1] != H or s1_use.shape[2] != W:
+        h_s1, w_s1 = s1_use.shape[1], s1_use.shape[2]
+        # Step 1: adjust_shape — edge-pad if too small, center-crop if too large
+        if h_s1 < H:
+            pad = (H - h_s1) // 2
+            if pad == 0:
+                s1_use = np.pad(s1_use, ((0, 0), (1, 0), (0, 0), (0, 0)), 'edge')
+            else:
+                s1_use = np.pad(s1_use, ((0, 0), (pad, pad), (0, 0), (0, 0)), 'edge')
+        elif h_s1 > H:
+            crop = (h_s1 - H) // 2
+            if crop == 0:
+                s1_use = s1_use[:, 1:, :, :]
+            else:
+                s1_use = s1_use[:, crop:-crop, :, :]
+        if w_s1 < W:
+            pad = (W - w_s1) // 2
+            if pad == 0:
+                s1_use = np.pad(s1_use, ((0, 0), (0, 0), (1, 0), (0, 0)), 'edge')
+            else:
+                s1_use = np.pad(s1_use, ((0, 0), (0, 0), (pad, pad), (0, 0)), 'edge')
+        elif w_s1 > W:
+            crop = (W - w_s1) // 2
+            if crop == 0:
+                s1_use = s1_use[:, :, 1:, :]
+            else:
+                s1_use = s1_use[:, :, crop:-crop, :]
+        # Step 2: pad_crop_to_hw — center-aligned final alignment
+        ch, cw = s1_use.shape[1], s1_use.shape[2]
+        if ch != H or cw != W:
+            hs = max(0, (ch - H) // 2)
+            ws = max(0, (cw - W) // 2)
+            he = min(ch, hs + H)
+            we = min(cw, ws + W)
+            s1_use = s1_use[:, hs:he, ws:we, :]
+            ch2, cw2 = s1_use.shape[1], s1_use.shape[2]
+            pad_h, pad_w = max(0, H - ch2), max(0, W - cw2)
+            if pad_h > 0 or pad_w > 0:
+                ph1, ph2 = pad_h // 2, pad_h - pad_h // 2
+                pw1, pw2 = pad_w // 2, pad_w - pad_w // 2
+                s1_use = np.pad(s1_use, ((0, 0), (ph1, ph2), (pw1, pw2), (0, 0)),
+                                mode='constant', constant_values=0)
 
     # Fill zero S1 values with temporal median
     s1_use = _fill_zeros_with_temporal_median(s1_use)
@@ -414,24 +607,41 @@ def predict_tile_from_arrays(
     feature_stack[:, :, :, 10] = np.broadcast_to(dem, (n_frames, H, W))
 
     # Median composite frame (last frame = index 4)
-    # Reference uses median of pre-Whittaker data; we approximate with
-    # median of 12 monthly smoothed data (closer to the full time series)
-    s2_median = np.median(s2_12, axis=0)       # (H, W, 10)
+    # Reference computes median from pre-Whittaker, pre-deal_w_missing_px data
+    # (lines 1269-1277, 1525-1527). s2_median_raw and indices_median_raw were
+    # computed earlier from post-cloud, post-clip data before zero/one replacement.
     s1_median = np.median(s1_use, axis=0)      # (H, W, 2)
-    indices_median = np.median(indices_12, axis=0)  # (H, W, 4)
 
-    feature_stack[-1, :, :, :10] = s2_median
+    feature_stack[-1, :, :, :10] = s2_median_raw
     feature_stack[-1, :, :, 11:13] = s1_median
-    feature_stack[-1, :, :, 13:] = indices_median
+    feature_stack[-1, :, :, 13:] = indices_median_raw
 
     logger.info(f"Feature stack: {feature_stack.shape}")
+
+    if intermediates is not None:
+        intermediates["feature_stack"] = feature_stack.copy()
+
+    if diagnostics is not None:
+        ch_stats = {}
+        for ch in range(17):
+            ch_data = feature_stack[:, :, :, ch]
+            ch_stats[ch] = {
+                "min": float(ch_data.min()),
+                "max": float(ch_data.max()),
+                "mean": float(ch_data.mean()),
+            }
+        diagnostics["feature_stack_channel_stats"] = ch_stats
+        diagnostics["feature_stack_shape"] = feature_stack.shape
 
     # ------------------------------------------------------------------
     # 8. Predict with overlapping subtiles
     #    (bright surface attenuation is applied per-subtile inside mosaic_predictions)
     # ------------------------------------------------------------------
     predict_sess = load_predict_graph(model_path)
-    predictions = mosaic_predictions(feature_stack, predict_sess, length=length)
+    predictions = mosaic_predictions(feature_stack, predict_sess, length=length, interp=interp_mask)
+
+    if intermediates is not None:
+        intermediates["prediction_raw"] = predictions.copy()
 
     # ------------------------------------------------------------------
     # 9. Post-process: nodata masking
@@ -457,18 +667,16 @@ def run(
     Returns a structured dict with ``status``, ``error_message``, etc.
     """
     import obstore as obs
-    from obstore.store import LocalStore, from_url
+    from gri_tile_pipeline.storage.obstore_utils import from_dest
+
+    aws_profile = kwargs.get("aws_profile")
 
     tag = f"{X_tile}X{Y_tile}Y"
     logger.info(f"predict_tile: {tag} year={year}")
 
     try:
         # Set up output store
-        if dest.startswith("s3://"):
-            store = from_url(dest, region="us-west-2")
-        else:
-            os.makedirs(dest, exist_ok=True)
-            store = LocalStore(prefix=dest)
+        store = from_dest(dest, region="us-east-1", profile=aws_profile)
 
         base_key = f"{year}/raw/{X_tile}/{Y_tile}/raw"
 
@@ -491,7 +699,7 @@ def run(
 
         # Download model from S3 if needed
         if model_path.startswith("s3://"):
-            model_store = from_url(model_path, region="us-west-2")
+            model_store = from_dest(model_path, region="us-east-1", profile=aws_profile)
             local_model = "/tmp/models"
             os.makedirs(local_model, exist_ok=True)
             for obj in obs.list(model_store):

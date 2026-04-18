@@ -23,14 +23,12 @@ from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
 
 
 # ------------------------------------
-# Worker entry-point
+# Worker entry-point (standalone module for Lithops pickling)
 # ------------------------------------
 
-def _run_s1_rtc(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    """De-synchronised worker for S1 RTC acquisition."""
-    time.sleep(random.uniform(0.0, 2.0))
-    from loaders.download_s1_rtc import run
-    return run(**kwargs)
+import gri_tile_pipeline.steps._lithops_path  # noqa: F401
+
+from lithops_workers import run_s1_rtc as _run_s1_rtc
 
 
 # ------------------------------------
@@ -208,7 +206,7 @@ def run_download_s1_rtc(
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures.append((
             RetryingFuture(
-                fexec.call_async(_run_s1_rtc, (kw,), include_modules=["loaders"]),
+                fexec.call_async(_run_s1_rtc, (kw,), include_modules=["loaders", "lithops_workers"]),
                 _run_s1_rtc, (kw,), retries=retries,
             ),
             "S1_RTC", "us-west-2", tile_info,

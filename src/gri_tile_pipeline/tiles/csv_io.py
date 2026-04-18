@@ -3,18 +3,41 @@
 from __future__ import annotations
 
 import csv
+import json
 from typing import Any, Dict, List
 
 
 REQUIRED_COLUMNS = {"Year", "X", "Y", "Y_tile", "X_tile"}
 
 
-def read_tiles_csv(path: str) -> List[Dict[str, Any]]:
-    """Read a tiles CSV into a list of dicts.
+def _read_failed_jobs_json(path: str) -> List[Dict[str, Any]]:
+    """Extract tile info from a failed-jobs JSON report."""
+    with open(path) as f:
+        jobs = json.load(f)
+    rows: List[Dict[str, Any]] = []
+    for job in jobs:
+        ti = job["tile_info"]
+        rows.append({
+            "year": int(ti["year"]),
+            "lon": float(ti["lon"]),
+            "lat": float(ti["lat"]),
+            "X_tile": int(ti["X_tile"]),
+            "Y_tile": int(ti["Y_tile"]),
+        })
+    return rows
 
-    Expected columns: ``Year, X, Y, Y_tile, X_tile``
+
+def read_tiles_csv(path: str) -> List[Dict[str, Any]]:
+    """Read tiles from a CSV or a failed-jobs JSON report.
+
+    For CSV, expected columns: ``Year, X, Y, Y_tile, X_tile``
     where *X* = lon (float) and *Y* = lat (float).
+
+    For JSON, expects a list of job objects with ``tile_info`` dicts.
     """
+    if path.endswith(".json"):
+        return _read_failed_jobs_json(path)
+
     rows: List[Dict[str, Any]] = []
     with open(path, newline="") as f:
         reader = csv.DictReader(f)

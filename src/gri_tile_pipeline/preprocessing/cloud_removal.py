@@ -37,6 +37,10 @@ try:
 except ImportError:  # pragma: no cover
     import numpy as bn  # type: ignore[no-redef]
 
+# Match reference: suppress NaN/Inf warnings from division-by-zero in index calculations.
+# The reference code relies on NaN/Inf propagation rather than epsilon guards.
+np.seterr(invalid='ignore', divide='ignore')
+
 
 # ---------------------------------------------------------------------------
 # Index helpers
@@ -44,17 +48,17 @@ except ImportError:  # pragma: no cover
 
 def _water_ndwi(arr: np.ndarray) -> np.ndarray:
     """NDWI = (Green - NIR) / (Green + NIR)."""
-    return (arr[..., 1] - arr[..., 3]) / (arr[..., 1] + arr[..., 3] + 1e-10)
+    return (arr[..., 1] - arr[..., 3]) / (arr[..., 1] + arr[..., 3])
 
 
 def _ndbi(arr: np.ndarray) -> np.ndarray:
     """NDBI = (SWIR1 - NIR) / (SWIR1 + NIR)."""
-    return (arr[..., 8] - arr[..., 3]) / (arr[..., 8] + arr[..., 3] + 1e-10)
+    return (arr[..., 8] - arr[..., 3]) / (arr[..., 8] + arr[..., 3])
 
 
 def _ndvi(arr: np.ndarray) -> np.ndarray:
     """NDVI = (NIR - Red) / (NIR + Red)."""
-    return (arr[..., 3] - arr[..., 2]) / (arr[..., 3] + arr[..., 2] + 1e-10)
+    return (arr[..., 3] - arr[..., 2]) / (arr[..., 3] + arr[..., 2])
 
 
 def _evi(x: np.ndarray) -> np.ndarray:
@@ -87,7 +91,7 @@ def hollstein_cloud_mask(arr: np.ndarray) -> np.ndarray:
     """
     step1 = arr[..., 7] > 0.166
     step2 = arr[..., 1] > 0.21
-    step3 = arr[..., 5] / (arr[..., 8] + 1e-10) < 4.292
+    step3 = arr[..., 5] / arr[..., 8] < 4.292
     cloud = step1 * step2 * step3
     for i in range(cloud.shape[0]):
         cloud[i] = binary_dilation(
@@ -135,7 +139,7 @@ def snow_filter(arr: np.ndarray) -> np.ndarray:
     Returns:
         Boolean array of same spatial shape: True = snow.
     """
-    ndsi = (arr[..., 1] - arr[..., 8]) / (arr[..., 1] + arr[..., 8] + 1e-10)
+    ndsi = (arr[..., 1] - arr[..., 8]) / (arr[..., 1] + arr[..., 8])
     ndsi[ndsi < 0.10] = 0.0
     ndsi[ndsi > 0.42] = 0.42
     snow_prob = (ndsi - 0.1) / 0.32
@@ -149,7 +153,7 @@ def snow_filter(arr: np.ndarray) -> np.ndarray:
     snow_prob[np.logical_and(arr[..., 0] > 0.22, snow_prob > 0)] = 1.0
 
     # B2/B4 ratio
-    b2b4ratio = arr[..., 0] / (arr[..., 2] + 1e-10)
+    b2b4ratio = arr[..., 0] / arr[..., 2]
     snow_prob[b2b4ratio < 0.75] = 0.0
 
     return snow_prob > 0
@@ -237,8 +241,8 @@ def detect_pfcp(
         b7down = np.reshape(b7down, (b7down.shape[0] // 2, 2, b7down.shape[1] // 2, 2))
         b7down = np.mean(b7down, axis=(1, 3))
 
-        r8a = b8down / (b8adown + 1e-10)
-        r8a7 = b7down / (b8adown + 1e-10)
+        r8a = b8down / b8adown
+        r8a7 = b7down / b8adown
 
         mean_op = np.ones((7, 7)) / 49.0
         mean_of_sq = signal.convolve2d(r8a ** 2, mean_op, mode="same", boundary="symm")
@@ -249,7 +253,7 @@ def detect_pfcp(
         sq_of_mean = signal.convolve2d(r8a7, mean_op, mode="same", boundary="symm") ** 2
         r8a7 = mean_of_sq - sq_of_mean
 
-        cdi = (r8a7 - r8a) / (r8a7 + r8a + 1e-10)
+        cdi = (r8a7 - r8a) / (r8a7 + r8a)
         pfcps = (cdi >= -0.4).astype(np.float32)
         pfcps = pfcps.repeat(2, axis=0).repeat(2, axis=1)
         pfcps = resize(pfcps, (arr.shape[1], arr.shape[2]), order=0, preserve_range=True)
@@ -302,7 +306,7 @@ def identify_clouds_shadows(
     def _hollstein_cld(arr):
         step1 = arr[..., 7] > 0.166
         step2b = arr[..., 1] > 0.28
-        step3 = arr[..., 5] / (arr[..., 8] + 1e-10) < 4.292
+        step3 = arr[..., 5] / arr[..., 8] < 4.292
         cl = step1 * step2b * step3
         for i in range(cl.shape[0]):
             cl[i] = binary_dilation(1 - (binary_dilation(cl[i] == 0, iterations=2)), iterations=10)
@@ -465,16 +469,16 @@ def identify_clouds_shadows(
     brightness_clouds = np.zeros_like(clouds, dtype=np.float32)
     for i in range(img.shape[0]):
         brightness_i = np.sum(img[i, ..., :3], axis=-1)
-        brightness_ratio = brightness_i / (median_brightness[i] + 1e-10)
+        brightness_ratio = brightness_i / median_brightness[i]
         brightness_ratio[water_mask > 0] = 1.0
-        if np.sum(clouds[i]) < 0.90 * clouds[i].size:
+        if np.sum(clouds[i] < 0.90):
             brightness_zscore = (
                 brightness_ratio - np.nanmean(brightness_ratio[clouds[i] == 0])
-            ) / (np.nanstd(brightness_ratio[clouds[i] == 0]) + 1e-10)
+            ) / np.nanstd(brightness_ratio[clouds[i] == 0])
         else:
             brightness_zscore = (
                 brightness_ratio - np.nanmean(brightness_ratio)
-            ) / (np.nanstd(brightness_ratio) + 1e-10)
+            ) / np.nanstd(brightness_ratio)
         brightness_clouds[i][brightness_zscore > 3.5] = 1.0
         brightness_clouds[i] *= (water_mask < 0)
 
@@ -488,7 +492,7 @@ def identify_clouds_shadows(
         mean_brightness = np.mean(img[i, ..., :3], axis=-1)
         is_possible_fp = mean_brightness < 0.4
         vis_range = np.max(img[i, ..., :3], axis=-1) - np.min(img[i, ..., :3], axis=-1)
-        is_fp = is_possible_fp * ((vis_range / (mean_brightness + 1e-10)) > 0.5)
+        is_fp = is_possible_fp * ((vis_range / mean_brightness) > 0.5)
         clouds[i] = clouds[i] * (1 - is_fp)
 
     # --- False positive cloud removal (Fmask 4.0 paralax) ---
@@ -566,11 +570,10 @@ def identify_clouds_shadows(
                 dilated = binary_dilation(np.copy(clouds[i]), iterations=50)
                 dilated = np.logical_or(dilated, dem >= 30)
                 shadows[i] = shadows[i] * dilated
-        if np.mean(clouds[i]) < 0.05 and np.mean(clouds[i]) > 0:
-            if (np.mean(shadows[i]) / (np.mean(clouds[i]) + 1e-10)) > 3:
-                dilated = binary_dilation(np.copy(clouds[i]), iterations=50)
-                dilated = np.logical_or(dilated, dem >= 30)
-                shadows[i] = shadows[i] * dilated
+        if np.mean(clouds[i]) < 0.05 and ((np.mean(shadows[i]) / np.mean(clouds[i])) > 3):
+            dilated = binary_dilation(np.copy(clouds[i]), iterations=50)
+            dilated = np.logical_or(dilated, dem >= 30)
+            shadows[i] = shadows[i] * dilated
 
     clouds = np.maximum(clouds, shadows)
     fcps = np.maximum(fcps, nir_swir_ratio)
@@ -582,8 +585,8 @@ def identify_clouds_shadows(
             blue_i = np.copy(img[i, ..., 0])
             blue_i = blue_i[clouds[i] == 0]
             if len(blue_i) > 0:
-                reference = np.mean(1 / (blue_i + 1e-10)) + 2 * np.std(1 / (blue_i + 1e-10))
-                shadow_i = 1 / (img[i, ..., 0] + 1e-10) > reference
+                reference = np.mean(1 / blue_i) + 2 * np.std(1 / blue_i)
+                shadow_i = 1 / img[i, ..., 0] > reference
                 shadow_i = shadow_i * (img[i, ..., 7] < 0.17)
                 shadow_i = binary_dilation(
                     1 - (binary_dilation(shadow_i == 0, iterations=2)), iterations=2
@@ -608,9 +611,9 @@ def identify_clouds_shadows(
     if len(mean_cloudfree_brightness) > 0:
         median_bright = np.median(mean_cloudfree_brightness)
         median_std = np.median(std_cloudfree_brightness)
-        haze_brightness = np.array(mean_cloudfree_brightness) / (median_bright + 1e-10)
-        haze_std = np.array(std_cloudfree_brightness) / (median_std + 1e-10)
-        haze_whiteness = np.array(std_cloudfree_whiteness) / (np.median(std_cloudfree_whiteness) + 1e-10)
+        haze_brightness = np.array(mean_cloudfree_brightness) / median_bright
+        haze_std = np.array(std_cloudfree_brightness) / median_std
+        haze_whiteness = np.array(std_cloudfree_whiteness) / np.median(std_cloudfree_whiteness)
         haze = (haze_brightness >= 1.5) * (haze_std <= 0.67) * (haze_whiteness < 1)
         haze = np.logical_or(haze, (haze_brightness >= 1.3) * (haze_std <= 0.5))
         logger.debug(f"Haze flags: {haze}")
@@ -679,7 +682,7 @@ def make_aligned_mosaic(arr: np.ndarray, interp: np.ndarray) -> np.ndarray:
         ``(H, W, 10)`` cloud-free mosaic.
     """
     water_mask = np.median(
-        (arr[..., 1] - arr[..., 3]) / (arr[..., 1] + arr[..., 3] + 1e-10), axis=0
+        (arr[..., 1] - arr[..., 3]) / (arr[..., 1] + arr[..., 3]), axis=0
     )
     water_mask = water_mask > 0
     water_mask = binary_dilation(1 - water_mask, iterations=2)
@@ -703,7 +706,7 @@ def make_aligned_mosaic(arr: np.ndarray, interp: np.ndarray) -> np.ndarray:
                 non_interp_areas[combined] += arr_b[combined]
                 non_interp_count[combined] += 1
 
-        non_interp_areas = non_interp_areas / (non_interp_count + 1e-10)
+        non_interp_areas = non_interp_areas / non_interp_count
         non_interp_mosaic_mask[non_interp_count[..., 0] == 0] = False
         non_interp_mosaic = arr[i][non_interp_mosaic_mask]
         non_interp_areas_flat = np.reshape(
@@ -722,19 +725,19 @@ def make_aligned_mosaic(arr: np.ndarray, interp: np.ndarray) -> np.ndarray:
             mean_src = bn.nanmedian(non_interp_mosaic, axis=0)
             std_src = bn.nanstd(non_interp_mosaic, axis=0)
 
-            std_mult = std_ref / (std_src + 1e-10)
+            std_mult = std_ref / std_src
             addition = mean_ref - (mean_src * std_mult)
             arr_i = np.copy(arr[i])
             arr_i[water_mask == 0] = arr_i[water_mask == 0] * std_mult + addition
             increment = (1 - interp[i][..., np.newaxis]) * arr_i
             mosaic = mosaic + increment
-        elif np.mean(water_mask) < 0.9:
+        elif np.mean(water_mask < 0.9):
             interp[i] = 1.0
         else:
             continue
 
     divisor[divisor < 0] = 0.0
-    mosaic = mosaic / (divisor + 1e-10)
+    mosaic = mosaic / divisor
     mosaic[np.isnan(mosaic)] = np.percentile(arr, 10, axis=0)[np.isnan(mosaic)]
     mins = np.min(arr, axis=0)
     maxs = np.max(arr, axis=0)
@@ -790,6 +793,7 @@ def align_interp_array_lr(
     interp: np.ndarray,
     mosaic: np.ndarray,
     water_mask: np.ndarray,
+    seed: Optional[int] = None,
 ) -> Tuple[np.ndarray, list]:
     """Normalise interpolated areas to non-interpolated areas via OLS.
 
@@ -876,6 +880,8 @@ def align_interp_array_lr(
 
             p98 = np.repeat(p98, 10)
             p2 = np.repeat(p2, 10)
+            if seed is not None:
+                random.seed(seed + date)
             for a in [p2, p98, p20, p40, p60, p80, p100]:
                 random.shuffle(a)
 
@@ -892,13 +898,15 @@ def align_interp_array_lr(
             non_interp_mid_mosaic = non_interp_mid_mosaic[random_sample]
             non_interp_mid_areas = non_interp_mid_areas[random_sample]
 
-            # Per-band linear regression
+            # Per-band linear regression (cumulative clipping matches reference)
+            # Reference order: copy train_x BEFORE clipping current band,
+            # then clip in-place for next iteration. So train_x for band N
+            # has bands 0..N-1 clipped but NOT band N itself.
             preds_out = np.copy(interp_array_i)
             for band in range(10):
                 train_x = np.copy(non_interp_mid_mosaic)
-                non_interp_mid_mosaic_clipped = np.copy(non_interp_mid_mosaic)
-                non_interp_mid_mosaic_clipped[..., band] = np.clip(
-                    non_interp_mid_mosaic_clipped[..., band], 0.005, 1
+                non_interp_mid_mosaic[..., band] = np.clip(
+                    non_interp_mid_mosaic[..., band], 0.005, 1
                 )
 
                 predicted = np.copy(np.concatenate([interp_array_i, snow], axis=-1))
@@ -935,6 +943,7 @@ def remove_cloud_and_shadows(
     fcps: np.ndarray,
     s1: Optional[np.ndarray] = None,
     mosaic: Optional[np.ndarray] = None,
+    seed: Optional[int] = None,
 ) -> Tuple[np.ndarray, np.ndarray, List[int]]:
     """Remove clouds and shadows by blending with a cloud-free mosaic.
 
@@ -983,6 +992,7 @@ def remove_cloud_and_shadows(
             areas_interpolated,
             mosaic,
             water_mask,
+            seed=seed,
         )
 
         tiles[date] = (

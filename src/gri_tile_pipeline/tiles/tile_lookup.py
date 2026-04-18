@@ -107,3 +107,41 @@ def resolve_tiles(
         return con.execute(query).fetch_df()
     finally:
         con.close()
+
+
+def identify_tiles_for_polygons(
+    gdf,
+    lookup_parquet: str = "data/tiledb.parquet",
+    lookup_csv: str = "",
+) -> List[Dict[str, Any]]:
+    """Spatial-join polygons against the tile grid to find required tiles.
+
+    Each polygon in *gdf* must have a ``pred_year`` column indicating
+    the prediction year for that polygon.
+
+    Returns a deduplicated list of tile dicts with keys:
+    ``year``, ``lon``, ``lat``, ``X_tile``, ``Y_tile``.
+    """
+    from gri_tile_pipeline.zonal.tile_download import load_tile_lookup, pre_filter_tiles
+
+    lookup = load_tile_lookup(parquet_path=lookup_parquet, lookup_csv=lookup_csv or None)
+
+    seen: Set[Tuple[int, int, int]] = set()
+    tiles: List[Dict[str, Any]] = []
+    for _, row in gdf.iterrows():
+        year = int(row["pred_year"])
+        pf = pre_filter_tiles(row.geometry, lookup)
+        for _, tile_row in pf.iterrows():
+            x_tile = int(tile_row["X_tile"])
+            y_tile = int(tile_row["Y_tile"])
+            key = (year, x_tile, y_tile)
+            if key not in seen:
+                seen.add(key)
+                tiles.append({
+                    "year": year,
+                    "lon": float(tile_row["X"]),
+                    "lat": float(tile_row["Y"]),
+                    "X_tile": x_tile,
+                    "Y_tile": y_tile,
+                })
+    return tiles

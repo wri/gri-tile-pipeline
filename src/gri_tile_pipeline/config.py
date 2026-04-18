@@ -23,6 +23,7 @@ class PredictConfig:
     memory_mb: int = 8192
     retries: int = 2
     timeout_sec: int = 600
+    model_path: str = "models"
 
 
 @dataclass
@@ -35,7 +36,12 @@ class S1RTCConfig:
 @dataclass
 class ZonalConfig:
     tile_bucket: str = "tof-output"
+    tile_region: str = "us-east-1"
     small_sites_area_thresh: float = 0.5
+    lulc_raster_path: str = ""
+    shift_error_enabled: bool = False
+    lookup_parquet: str = "data/tiledb.parquet"
+    lookup_csv: str = ""
 
 
 @dataclass
@@ -92,12 +98,14 @@ def load_config(path: Optional[str] = None) -> PipelineConfig:
             setattr(cfg.s1_rtc, key, s1[key])
 
     pred = raw.get("predict", {})
-    for key in ("runtime", "memory_mb", "retries", "timeout_sec"):
+    for key in ("runtime", "memory_mb", "retries", "timeout_sec", "model_path"):
         if pred.get(key) is not None:
             setattr(cfg.predict, key, pred[key])
 
     zn = raw.get("zonal", {})
-    for key in ("tile_bucket", "small_sites_area_thresh"):
+    for key in ("tile_bucket", "tile_region", "small_sites_area_thresh",
+                "lulc_raster_path", "shift_error_enabled", "lookup_parquet",
+                "lookup_csv"):
         if zn.get(key) is not None:
             setattr(cfg.zonal, key, zn[key])
 

@@ -21,12 +21,12 @@ AVG_PREDICT_DURATION = 180
 
 
 # ------------------------------------
-# Worker entry-point
+# Worker entry-point (standalone module for Lithops pickling)
 # ------------------------------------
 
-def _run_predict(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    from loaders.predict_tile import run
-    return run(**kwargs)
+import gri_tile_pipeline.steps._lithops_path  # noqa: F401
+
+from lithops_workers import run_predict as _run_predict
 
 
 # ------------------------------------
@@ -99,7 +99,7 @@ def run_predict(
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures.append((
             RetryingFuture(
-                fexec.call_async(_run_predict, (kw,), include_modules=["loaders"]),
+                fexec.call_async(_run_predict, (kw,), include_modules=["loaders", "lithops_workers"]),
                 _run_predict, (kw,), retries=retries,
             ),
             "PREDICT", "us-west-2", tile_info,
@@ -126,6 +126,7 @@ def run_predict_local(
     report_dir: str = "job_reports",
     debug: bool = False,
     max_workers: int = 1,
+    aws_profile: str | None = None,
 ) -> JobTracker:
     """Run prediction locally — no Lithops.
 
@@ -142,7 +143,9 @@ def run_predict_local(
 
     if skip_existing:
         from gri_tile_pipeline.tiles.availability import filter_missing_tiles
-        tiles = filter_missing_tiles(tiles, dest, check_type="predictions")
+        from gri_tile_pipeline.storage.obstore_utils import from_dest
+        store = from_dest(dest, region="us-east-1", profile=aws_profile)
+        tiles = filter_missing_tiles(tiles, dest, check_type="predictions", store=store)
         if not tiles:
             logger.info("All prediction tiles already exist — nothing to do")
             return JobTracker(report_dir)
@@ -159,6 +162,7 @@ def run_predict_local(
             "dest": dest,
             "model_path": model_path,
             "debug": debug,
+            "aws_profile": aws_profile,
         }
         for t in tiles
     ]
