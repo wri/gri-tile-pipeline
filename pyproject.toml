@@ -1,0 +1,32 @@
+[project]
+name = "gri-tile-pipeline"
+version = "0.1.0"
+description = "A package for interacting with the TerraMatch API, enabling researchers to pull project and polygon-specific data and update indicator values programmatically."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "arraylake",
+  "boto3",
+  "click",
+  "dask_image",
+  "dask<2025.3.0",
+  "distributed",
+  "duckdb",
+  "hickle",
+  "lithops",
+  "loguru",
+  "matplotlib",
+  "numexpr",
+  "obstore",
+  "odc-geo",
+  "odc-stac",
+  "psycopg2-binary",
+  "pyproj",
+  "pystac-client",
+  "pytest",
+  "pyyaml",
+  "rasterio",
+  "scikit-image",
+  "shapely",
+  "xarray",
+]
