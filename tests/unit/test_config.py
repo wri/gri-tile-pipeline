@@ -22,7 +22,7 @@ def test_default_values():
     assert cfg.download.memory_mb == 4096
     assert cfg.predict.memory_mb == 6144
     assert cfg.predict.timeout_sec == 600
-    assert cfg.zonal.tile_bucket == "tof-output"
+    assert cfg.zonal.tile_bucket == "wri-restoration-geodata-ttc"
 
 
 def test_load_config_nonexistent_returns_defaults(tmp_path, monkeypatch):

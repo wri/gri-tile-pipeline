@@ -55,7 +55,7 @@ class S1RTCConfig:
 
 @dataclass
 class ZonalConfig:
-    tile_bucket: str = "tof-output"
+    tile_bucket: str = "wri-restoration-geodata-ttc"
     tile_region: str = "us-east-1"
     small_sites_area_thresh: float = 0.5
     lulc_raster_path: str = ""
@@ -70,8 +70,8 @@ class LithopsConfig:
     usw2_config: str = ".lithops/config.usw2.yaml"
     s1_usw2_config: str = ".lithops/config.s1_usw2.yaml"
     # No default: the old legacy path was us-west-2, which silently cross-regioned
-    # writes to `tof-output` (us-east-1). Require explicit opt-in via LITHOPS_ENV or
-    # a per-key YAML override so misconfiguration fails loud at the point of use.
+    # writes to the predictions bucket (us-east-1). Require explicit opt-in via
+    # LITHOPS_ENV or a per-key YAML override so misconfiguration fails loud at use.
     predict_config: str = ""
 
 

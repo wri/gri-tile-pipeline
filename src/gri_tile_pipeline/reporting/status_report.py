@@ -472,7 +472,7 @@ def generate_report(
     where_sql: str | None = None,
     geoparquet: str = "temp/tm.geoparquet",
     tiledb: str = "data/tiledb.parquet",
-    bucket: str = "tof-output",
+    bucket: str = "wri-restoration-geodata-ttc",
     region: str = "us-east-1",
     check_type: str = "predictions",
     skip_s3: bool = False,

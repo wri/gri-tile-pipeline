@@ -4,7 +4,7 @@ Runs a single prediction through the ``ttc-predict-dev`` Lambda via Lithops,
 then validates the resulting ``FINAL.tif`` has a sensible shape, dtype, and
 content distribution. Intended as the first thing to run after
 ``make -C infra build-all ENV=land-research`` to confirm the runtime image,
-IAM role, and cross-account ``tof-output`` write are all wired correctly.
+IAM role, and bucket writes are all wired correctly.
 
 Usage (from repo root, after ``aws sso login --profile resto-user``)::
 
@@ -194,7 +194,7 @@ def main() -> int:
     )
     ap.add_argument("--tile", default="1000X871Y", help="Tile label (e.g. 1000X871Y).")
     ap.add_argument("--year", type=int, default=2023, help="Prediction year.")
-    ap.add_argument("--dest", default="s3://tof-output", help="S3 URI or local path for ARD + output TIF.")
+    ap.add_argument("--dest", default="s3://wri-restoration-geodata-ttc", help="S3 URI or local path for ARD + output TIF.")
     ap.add_argument("--memory-mb", type=int, default=6144, help="Lambda memory.")
     ap.add_argument("--timeout", type=int, default=900, help="Client-side wait timeout (sec); should be >= aws_lambda.runtime_timeout.")
     ap.add_argument("--runtime", default="ttc-predict-dev", help="Lithops runtime name.")

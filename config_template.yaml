@@ -64,7 +64,7 @@ predict:
 # =============================================================================
 
 zonal:
-  tile_bucket: tof-output      # S3 bucket hosting the prediction tiles
+  tile_bucket: wri-restoration-geodata-ttc  # S3 bucket hosting the prediction tiles
   tile_region: us-east-1
   small_sites_area_thresh: 0.5 # hectares; below this -> small-site handling
   lulc_raster_path: ""         # optional LULC raster URI for error propagation

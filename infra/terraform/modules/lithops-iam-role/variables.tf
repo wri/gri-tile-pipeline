@@ -10,7 +10,7 @@ variable "lithops_state_bucket_arns" {
 }
 
 variable "output_bucket_arn" {
-  description = "ARN of the pipeline output bucket (e.g. arn:aws:s3:::tof-output in the wri account)."
+  description = "ARN of the pipeline output bucket (same account; Lambda reads/writes ARD and predictions here)."
   type        = string
 }
 

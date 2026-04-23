@@ -31,8 +31,7 @@ resource "aws_iam_role_policy_attachment" "basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Lithops state buckets (futures, args, task logs) + the pipeline output bucket
-# (cross-account; the output bucket's policy must also grant this role).
+# Lithops state buckets (futures, args, task logs) + the pipeline output bucket.
 data "aws_iam_policy_document" "inline" {
   statement {
     sid     = "LithopsStateBuckets"

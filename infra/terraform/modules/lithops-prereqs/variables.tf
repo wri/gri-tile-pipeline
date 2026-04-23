@@ -4,7 +4,7 @@ variable "region" {
 }
 
 variable "bucket_name" {
-  description = "Override the bucket name. Defaults to \"lithops-ttc-<region>\"."
+  description = "Override the bucket name. Defaults to \"wri-restoration-lithops-ttc-<region>\"."
   type        = string
   default     = null
 }

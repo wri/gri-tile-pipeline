@@ -5,18 +5,9 @@ variable "role_name" {
 }
 
 variable "output_bucket_name" {
-  description = "Pipeline output bucket in the wri account."
+  description = "Dedicated TTC pipeline output bucket (ARD + predictions), in this account, us-east-1."
   type        = string
-  default     = "tof-output"
-}
-
-variable "output_bucket_prefixes" {
-  description = "Restrict the cross-account grant to these prefixes. Empty list = whole bucket."
-  type        = list(string)
-  # Current pipeline writes:
-  #   {year}/raw/{X}/{Y}/raw/...   (ARD)
-  #   {year}/tiles/{X}/{Y}/...     (predictions)
-  default = []
+  default     = "wri-restoration-geodata-ttc"
 }
 
 variable "tags" {

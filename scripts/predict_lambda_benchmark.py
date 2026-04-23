@@ -45,7 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from predict_lambda_smoke import KNOWN_TILES, _check_ard  # noqa: E402
 
-TOF_OUTPUT_REGION = "us-east-1"
+TTC_BUCKET_REGION = "us-east-1"
 
 
 def _git_sha() -> str:
@@ -202,7 +202,7 @@ def _summarize(rows: list[dict], lambda_region: str, max_workers: int, memory_mb
     total_elapsed = max(r["complete_s"] for r in ok)
     throughput = len(ok) / (total_elapsed / 60) if total_elapsed else 0.0
 
-    cross_region = lambda_region != TOF_OUTPUT_REGION
+    cross_region = lambda_region != TTC_BUCKET_REGION
 
     def _p(xs: list[float], q: float) -> float:
         if not xs:
@@ -215,7 +215,7 @@ def _summarize(rows: list[dict], lambda_region: str, max_workers: int, memory_mb
     print("[bench] Summary")
     print(f"    invocations:         {len(rows)} ({len(ok)} ok, {len(rows) - len(ok)} failed)")
     print(f"    lambda region:       {lambda_region}")
-    print(f"    tof-output region:   {TOF_OUTPUT_REGION}")
+    print(f"    ttc bucket region:   {TTC_BUCKET_REGION}")
     print(f"    cross-region egress: {'YES (paying for it)' if cross_region else 'no (co-located)'}")
     print(f"    runtime memory:      {memory_mb} MB")
     print(f"    max workers:         {max_workers}")
@@ -271,7 +271,7 @@ def main() -> int:
     parser.add_argument("--env", default=os.environ.get("LITHOPS_ENV", "land-research"))
     parser.add_argument("--tiles", type=int, default=20, help="Number of invocations to submit")
     parser.add_argument("--year", type=int, default=2023)
-    parser.add_argument("--dest", default="s3://tof-output")
+    parser.add_argument("--dest", default="s3://wri-restoration-geodata-ttc")
     parser.add_argument("--memory-mb", type=int, default=6144)
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--runtime", default="ttc-predict-dev")

@@ -13,7 +13,7 @@ compares the output to:
      drift that reference-only comparison would miss).
 
 Skipped unless ``PARITY_LAMBDA=1`` is set. Both tests require:
-  - ARD for the 3 golden tiles uploaded to ``--dest`` (default ``s3://tof-output``)
+  - ARD for the 3 golden tiles uploaded to ``--dest`` (default ``s3://wri-restoration-geodata-ttc``)
   - ``.lithops/land-research/config.predict.yaml`` rendered (see docs/setup.md)
   - ``AWS_PROFILE=resto-user`` (or another profile with access to the bucket)
 
@@ -93,7 +93,7 @@ def _env() -> str:
 
 
 def _dest() -> str:
-    return os.environ.get("PARITY_DEST", "s3://tof-output")
+    return os.environ.get("PARITY_DEST", "s3://wri-restoration-geodata-ttc")
 
 
 def _lithops_config_path() -> Path:

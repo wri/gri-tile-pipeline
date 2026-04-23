@@ -53,7 +53,7 @@ from loguru import logger
 
 _TILE_RE = re.compile(r"^(\d+)X(\d+)Y$")
 
-# ARD keys in tof-output have drifted over time across two orthogonal axes:
+# ARD keys in the predictions bucket have drifted over time across two orthogonal axes:
 #   1. bucket prefix: <root> vs 'dev-ttc-lithops-usw2/' (and maybe others)
 #   2. base pattern: canonical '{year}/raw/{x}/{y}/raw/...' vs alternate
 #      '{year}/{x}/{y}/raw/...' (the first 'raw/' segment is missing).
@@ -502,8 +502,8 @@ def main() -> int:
                     help="Year (matches the S3 key prefix, e.g. 2025).")
     ap.add_argument("--mode", choices=("local", "lambda"), default="local",
                     help="Where to run the new prediction. Default: local.")
-    ap.add_argument("--dest", default="s3://tof-output",
-                    help="S3 bucket URI where ARD + FINAL.tif live. Default: s3://tof-output")
+    ap.add_argument("--dest", default="s3://wri-restoration-geodata-ttc",
+                    help="S3 bucket URI where ARD + FINAL.tif live. Default: s3://wri-restoration-geodata-ttc")
     ap.add_argument("--region", default="us-east-1",
                     help="AWS region for the bucket.")
     ap.add_argument(

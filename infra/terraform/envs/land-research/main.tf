@@ -30,15 +30,45 @@ module "role" {
     module.state_euc1.bucket_arn,
     module.state_use1.bucket_arn,
   ]
-  output_bucket_arn = "arn:aws:s3:::${var.output_bucket_name}"
+  output_bucket_arn = aws_s3_bucket.ttc_data.arn
   tags              = var.tags
 }
 
-# Cross-account grant is applied MANUALLY, This module only generates
-# the statement JSON; it creates no AWS resources.
-module "cross_account_statements" {
-  source            = "../../modules/cross-account-s3-access"
-  bucket_name       = var.output_bucket_name
-  grantee_role_arns = [module.role.role_arn]
-  key_prefixes      = var.output_bucket_prefixes
+# Dedicated TTC data bucket (ARD + predictions), co-located with the predict
+# Lambda in us-east-1. Intelligent-Tiering via a day-0 lifecycle rule means
+# uploads land in Standard and AWS auto-manages access-tier placement from
+# there — callers don't have to specify a storage class.
+resource "aws_s3_bucket" "ttc_data" {
+  provider = aws.use1
+  bucket   = var.output_bucket_name
+  tags     = var.tags
+}
+
+resource "aws_s3_bucket_public_access_block" "ttc_data" {
+  provider                = aws.use1
+  bucket                  = aws_s3_bucket.ttc_data.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "ttc_data" {
+  provider = aws.use1
+  bucket   = aws_s3_bucket.ttc_data.id
+
+  rule {
+    id     = "intelligent-tiering"
+    status = "Enabled"
+    filter {}
+
+    transition {
+      days          = 0
+      storage_class = "INTELLIGENT_TIERING"
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
 }

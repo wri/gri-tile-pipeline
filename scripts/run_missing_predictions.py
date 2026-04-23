@@ -110,7 +110,7 @@ def main():
     )
     parser.add_argument("csv", help="Path to tiles CSV (Year,X,Y,Y_tile,X_tile)")
     parser.add_argument(
-        "--bucket", default="tof-output", help="S3 bucket containing ARD (default: tof-output)"
+        "--bucket", default="wri-restoration-geodata-ttc", help="S3 bucket containing ARD (default: wri-restoration-geodata-ttc)"
     )
     parser.add_argument(
         "--region", default="us-east-1", help="S3 bucket region (default: us-east-1)"

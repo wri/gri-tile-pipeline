@@ -372,7 +372,7 @@ def _identify_tiles(
 def _resolve_tiles_bucket(dest: str) -> str:
     """Extract tiles_bucket value from dest for zonal stats.
 
-    For S3: returns bucket name (e.g. 'tof-output')
+    For S3: returns bucket name (e.g. 'wri-restoration-geodata-ttc')
     For local: returns the local path as-is
     """
     if dest.startswith("s3://"):

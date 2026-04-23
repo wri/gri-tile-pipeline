@@ -9,7 +9,7 @@ terraform {
 }
 
 locals {
-  bucket_name = coalesce(var.bucket_name, "lithops-ttc-${var.region}")
+  bucket_name = coalesce(var.bucket_name, "wri-restoration-lithops-ttc-${var.region}")
 }
 
 resource "aws_s3_bucket" "state" {
