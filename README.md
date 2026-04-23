@@ -61,7 +61,7 @@ All four commands below default to running on AWS Lambda via Lithops —
 export your creds first and the first log line confirms the mode:
 
 ```bash
-export AWS_PROFILE=resto-user LITHOPS_ENV=land-research
+export AWS_PROFILE=<land_research_aws_acct> LITHOPS_ENV=land-research
 ```
 
 Pass `--local` on any command to run workers in-process instead.
