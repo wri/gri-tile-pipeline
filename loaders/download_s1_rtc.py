@@ -46,8 +46,6 @@ import traceback
 from dataclasses import dataclass
 from typing import Callable, TypeVar
 
-from loaders.shared import make_bbox, obstore_put_hkl, compute_band_stats
-
 T = TypeVar('T')
 
 # -------------------- Custom Exceptions --------------------
@@ -243,6 +241,16 @@ def apply_sas_to_item_assets(items, sas_token: str, asset_keys: list[str] | None
 def _elapsed_ms(t_start: float) -> float:
     return (time.perf_counter() - t_start) * 1000.0
 
+def make_bbox(initial_bbx: list, expansion: int = 10) -> list:
+    """Expand a point bbox by ~degrees (same style as your code)."""
+    multiplier = 1 / 360
+    bbx = initial_bbx.copy()
+    bbx[0] -= expansion * multiplier
+    bbx[1] -= expansion * multiplier
+    bbx[2] += expansion * multiplier
+    bbx[3] += expansion * multiplier
+    return bbx
+
 def bbox2geojson(bbox: list) -> dict:
     x1, y1, x2, y2 = bbox
     return {
@@ -319,11 +327,40 @@ def _daily_coverage_fraction(items: list, tile_bounds: tuple) -> float:
         return 0.0
 
 
+def obstore_put_hkl(store, relpath: str, obj) -> None:
+    tmp = tempfile.NamedTemporaryFile(suffix=".hkl", delete=False)
+    tmp.close()
+    try:
+        hkl.dump(obj, tmp.name, mode="w", compression="gzip")
+        with open(tmp.name, "rb") as f:
+            obs.put(store, relpath, f.read())
+    finally:
+        try:
+            os.remove(tmp.name)
+        except Exception:
+            pass
+
 def obstore_put_text(store, relpath: str, text: str) -> None:
     try:
         obs.put(store, relpath, text.encode("utf-8"))
     except Exception as e:
         logger.error(f"Failed to write text sidecar {relpath}: {e}")
+
+def compute_band_stats(arr: np.ndarray) -> dict:
+    vals = arr.astype(np.float32)
+    total = int(vals.size)
+    mask = vals > 0
+    valid = vals[mask]
+    if valid.size == 0:
+        return {"min": 0, "max": 0, "mean": 0.0, "std": 0.0,
+                "p5": 0.0, "p50": 0.0, "p95": 0.0,
+                "valid_ratio": 0.0, "count": total, "valid_count": 0}
+    p5, p50, p95 = np.percentile(valid, [5, 50, 95])
+    return {"min": int(valid.min()), "max": int(valid.max()),
+            "mean": float(valid.mean()), "std": float(valid.std()),
+            "p5": float(p5), "p50": float(p50), "p95": float(p95),
+            "valid_ratio": float(valid.size / total) if total > 0 else 0.0,
+            "count": total, "valid_count": int(valid.size)}
 
 def _to_numpy(x) -> np.ndarray:
     """Robust conversion to NumPy array across xarray/dask versions."""
