@@ -2,7 +2,8 @@
 """End-to-end TTC pipeline for a TerraMatch project.
 
 Extracts polygons by short_name or request CSV, identifies required tiles,
-downloads ARD, runs inference locally, and computes zonal TTC statistics.
+downloads ARD, runs inference (via Lithops/Lambda by default; pass --local
+for in-process), and computes zonal TTC statistics.
 
 Usage:
     uv run python scripts/run_project_e2e.py GHA_22_INEC --dest s3://tof-output
@@ -40,8 +41,11 @@ def main():
                         help="Override prediction year (default: plantstart - 1)")
     parser.add_argument("-o", "--output", default=None,
                         help="Output CSV path")
+    parser.add_argument("--local", action="store_true", default=False,
+                        help="Run download + predict in-process on this machine. "
+                             "Default: fan out via Lithops/AWS Lambda.")
     parser.add_argument("--max-workers", type=int, default=1,
-                        help="Parallel workers for download/predict")
+                        help="Parallel workers for --local mode (ignored in Lithops mode)")
     parser.add_argument("--skip-existing", action="store_true", default=True,
                         help="Skip tiles already at dest (default)")
     parser.add_argument("--no-skip-existing", dest="skip_existing", action="store_false",
@@ -78,6 +82,7 @@ def main():
             geoparquet=args.geoparquet,
             year=args.year,
             output=args.output,
+            local=args.local,
             max_workers=args.max_workers,
             skip_existing=args.skip_existing,
             lulc_raster=args.lulc_raster,

@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 import yaml
 from loguru import logger
+
+
+LITHOPS_ENV_VAR = "LITHOPS_ENV"
+
+
+def _lithops_paths_for_env(env: str) -> dict[str, str]:
+    """Paths produced by infra/lithops/render.py for a given env."""
+    base = f".lithops/{env}"
+    return {
+        "euc1_config": f"{base}/config.loaders-euc1.yaml",
+        "usw2_config": f"{base}/config.loaders-usw2.yaml",
+        "s1_usw2_config": f"{base}/config.s1.yaml",
+        "predict_config": f"{base}/config.predict.yaml",
+    }
 
 
 @dataclass
@@ -20,7 +35,12 @@ class DownloadConfig:
 @dataclass
 class PredictConfig:
     runtime: str = "ttc-predict-dev"
-    memory_mb: int = 8192
+    # 6144 MB sized from CloudWatch: observed peak ~3437 MB + ~79% headroom for
+    # outlier tiles (larger temporal stacks, denser clouds). Lambda allocates
+    # ~3.5 vCPU at this tier vs ~4.6 at 8192 — modest CPU trade for ~25% GB-sec
+    # savings. Verify post-change by re-running scripts/predict_lambda_benchmark.py
+    # and confirming CloudWatch MaxMemoryUsed stays under ~4500 MB.
+    memory_mb: int = 6144
     retries: int = 2
     timeout_sec: int = 600
     model_path: str = "models"
@@ -49,7 +69,10 @@ class LithopsConfig:
     euc1_config: str = ".lithops/config.euc1.yaml"
     usw2_config: str = ".lithops/config.usw2.yaml"
     s1_usw2_config: str = ".lithops/config.s1_usw2.yaml"
-    predict_config: str = ".lithops/config.predict_usw2.yaml"
+    # No default: the old legacy path was us-west-2, which silently cross-regioned
+    # writes to `tof-output` (us-east-1). Require explicit opt-in via LITHOPS_ENV or
+    # a per-key YAML override so misconfiguration fails loud at the point of use.
+    predict_config: str = ""
 
 
 @dataclass
@@ -62,21 +85,38 @@ class PipelineConfig:
     zonal: ZonalConfig = field(default_factory=ZonalConfig)
 
 
+def _apply_lithops_env(cfg: PipelineConfig) -> None:
+    """If LITHOPS_ENV is set, retarget all four lithops config paths."""
+    env = os.environ.get(LITHOPS_ENV_VAR)
+    if not env:
+        return
+    paths = _lithops_paths_for_env(env)
+    for key, value in paths.items():
+        setattr(cfg.lithops, key, value)
+    logger.info(f"{LITHOPS_ENV_VAR}={env} -> using {paths['predict_config']} etc.")
+
+
 def load_config(path: Optional[str] = None) -> PipelineConfig:
-    """Load config from YAML, falling back to defaults for missing keys."""
+    """Load config from YAML, falling back to defaults for missing keys.
+
+    Precedence for Lithops config paths (lowest to highest):
+      1. Built-in defaults (legacy .lithops/config.*.yaml)
+      2. LITHOPS_ENV env var -> .lithops/<env>/config.*.yaml
+      3. Per-key override in the pipeline YAML
+    """
+    cfg = PipelineConfig()
+    _apply_lithops_env(cfg)
+
     if path is None:
-        # Try default location
         default = Path("config.yaml")
         if not default.exists():
             logger.warning("No config file found; using built-in defaults")
-            return PipelineConfig()
+            return cfg
         path = str(default)
 
     logger.info(f"Using config: {path}")
     with open(path) as f:
         raw = yaml.safe_load(f) or {}
-
-    cfg = PipelineConfig()
 
     pipeline = raw.get("pipeline", {})
     if pipeline.get("parquet_path"):

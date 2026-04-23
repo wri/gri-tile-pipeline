@@ -14,13 +14,107 @@ Pipeline per tile (matching reference download_and_predict_job.py):
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import tempfile
+import time
 import traceback
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import numpy as np
 from loguru import logger
+
+from gri_tile_pipeline.phase_timer import PhaseTimer, timed
+
+
+_MODEL_SHA256_CACHE: Dict[str, str] = {}
+
+# Files the Dockerfile bakes the pipeline git sha into. Checked in order;
+# first non-empty read wins. Kept in sync with `COPY docker/.git_sha ...`
+# in docker/PredictDockerfile.
+_GIT_SHA_FILES = ("/function/.git_sha", "/var/task/.git_sha")
+
+
+def _resolve_container_git_sha() -> Optional[str]:
+    """Return the pipeline git sha baked into the Lambda image, or None.
+
+    Precedence: ``GRI_GIT_SHA`` env var, then the sha file the Dockerfile
+    copies into ``/function/.git_sha`` (Lithops/Lambda layout). Returning
+    None is fine — the STAC sidecar treats ``gri:git_sha`` as nullable.
+    """
+    env_sha = (os.environ.get("GRI_GIT_SHA") or "").strip()
+    if env_sha:
+        return env_sha
+    for path in _GIT_SHA_FILES:
+        try:
+            with open(path) as f:
+                sha = f.read().strip()
+                if sha and sha != "unknown":
+                    return sha
+        except OSError:
+            continue
+    return None
+
+
+def _compute_model_sha256(pb_path: str) -> Optional[str]:
+    """Return SHA-256 of the frozen graph at *pb_path*, cached per-process."""
+    cached = _MODEL_SHA256_CACHE.get(pb_path)
+    if cached:
+        return cached
+    try:
+        h = hashlib.sha256()
+        with open(pb_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        sha = h.hexdigest()
+        _MODEL_SHA256_CACHE[pb_path] = sha
+        return sha
+    except OSError:
+        return None
+
+
+def _build_provenance(
+    *,
+    model_dir: str,
+    pipeline_version: Optional[str],
+    git_sha: Optional[str],
+    run_id: Optional[str],
+) -> Dict[str, Any]:
+    """Assemble provenance fields for the STAC sidecar.
+
+    ``model_dir`` is the local directory holding ``predict_graph-172.pb``.
+    We hash the .pb file once per worker (cached) so subsequent tiles in the
+    same Lambda invocation skip the rehash.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    pb_name = "predict_graph-172.pb"
+    pb_path = os.path.join(model_dir, pb_name)
+    model_sha = _compute_model_sha256(pb_path)
+
+    if pipeline_version is None:
+        try:
+            pipeline_version = version("gri-tile-pipeline")
+        except PackageNotFoundError:
+            pipeline_version = "unknown"
+    if git_sha is None:
+        git_sha = _resolve_container_git_sha()
+
+    return {
+        "model": {
+            "name": "predict_graph-172",
+            "path": pb_path,
+            "sha256": model_sha,
+            "input_size": 172,
+            "output_size": 158,
+            "length": 4,
+        },
+        "pipeline_version": pipeline_version,
+        "git_sha": git_sha,
+        "run_id": run_id,
+    }
 
 
 def _load_hkl(store, key: str):
@@ -45,39 +139,47 @@ def _load_hkl_local(path: str):
     return hkl.load(path)
 
 
-def _write_geotiff(store, key: str, arr: np.ndarray, lon: float, lat: float):
-    """Write a uint8 GeoTIFF for the prediction output."""
+def _cog_write(dst_path: str, arr: np.ndarray, lon: float, lat: float) -> None:
+    """Write *arr* as a Cloud Optimized GeoTIFF at *dst_path*.
+
+    COG driver handles internal tiling + overview generation automatically.
+    Predictions are tree-cover % (uint8, 0-100) with nodata=255; ``average``
+    resampling respects the nodata sentinel when building overviews.
+    """
     import rasterio
-    import obstore as obs
     from rasterio.transform import from_bounds
+    from gri_tile_pipeline.storage.stac import tile_bbox
 
-    tile_deg = 1.0 / 18.0  # ~0.0556 degrees
-    west = lon - tile_deg / 2
-    south = lat - tile_deg / 2
-    east = lon + tile_deg / 2
-    north = lat + tile_deg / 2
-
+    west, south, east, north = tile_bbox(lon, lat)
     h, w = arr.shape
     transform = from_bounds(west, south, east, north, w, h)
+
+    with rasterio.open(
+        dst_path,
+        "w",
+        driver="COG",
+        height=h,
+        width=w,
+        count=1,
+        dtype="uint8",
+        crs="EPSG:4326",
+        transform=transform,
+        nodata=255,
+        compress="deflate",
+        blocksize=256,
+        overview_resampling="average",
+    ) as dst:
+        dst.write(arr, 1)
+
+
+def _write_geotiff(store, key: str, arr: np.ndarray, lon: float, lat: float):
+    """Write the prediction COG to *store* at *key*."""
+    import obstore as obs
 
     tmp = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
     tmp.close()
     try:
-        with rasterio.open(
-            tmp.name,
-            "w",
-            driver="GTiff",
-            height=h,
-            width=w,
-            count=1,
-            dtype="uint8",
-            crs="EPSG:4326",
-            transform=transform,
-            compress="deflate",
-            nodata=255,
-        ) as dst:
-            dst.write(arr, 1)
-
+        _cog_write(tmp.name, arr, lon, lat)
         with open(tmp.name, "rb") as f:
             obs.put(store, key, f.read())
     finally:
@@ -85,34 +187,51 @@ def _write_geotiff(store, key: str, arr: np.ndarray, lon: float, lat: float):
 
 
 def _write_geotiff_local(path: str, arr: np.ndarray, lon: float, lat: float):
-    """Write a uint8 GeoTIFF directly to a local path."""
-    import rasterio
-    from rasterio.transform import from_bounds
-
-    tile_deg = 1.0 / 18.0
-    west = lon - tile_deg / 2
-    south = lat - tile_deg / 2
-    east = lon + tile_deg / 2
-    north = lat + tile_deg / 2
-
-    h, w = arr.shape
-    transform = from_bounds(west, south, east, north, w, h)
-
+    """Write the prediction COG directly to a local *path*."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with rasterio.open(
-        path,
-        "w",
-        driver="GTiff",
-        height=h,
-        width=w,
-        count=1,
-        dtype="uint8",
-        crs="EPSG:4326",
-        transform=transform,
-        compress="deflate",
-        nodata=255,
-    ) as dst:
-        dst.write(arr, 1)
+    _cog_write(path, arr, lon, lat)
+
+
+def _build_stac_item(
+    *,
+    x_tile: int,
+    y_tile: int,
+    year: int,
+    lon: float,
+    lat: float,
+    asset_href: str,
+    provenance: Dict[str, Any],
+) -> Dict[str, Any]:
+    from gri_tile_pipeline.storage.stac import build_predict_stac_item
+
+    return build_predict_stac_item(
+        x_tile=x_tile,
+        y_tile=y_tile,
+        year=year,
+        lon=lon,
+        lat=lat,
+        asset_href=asset_href,
+        model=provenance["model"],
+        pipeline_version=provenance["pipeline_version"],
+        git_sha=provenance["git_sha"],
+        run_id=provenance["run_id"],
+        created=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+
+
+def _write_stac_sidecar(store, key: str, item: Dict[str, Any]) -> None:
+    """Upload the STAC Item JSON next to the COG."""
+    import obstore as obs
+
+    data = json.dumps(item, indent=2, sort_keys=True).encode("utf-8")
+    obs.put(store, key, data)
+
+
+def _write_stac_sidecar_local(path: str, item: Dict[str, Any]) -> None:
+    """Write the STAC Item JSON next to a local COG output."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(item, f, indent=2, sort_keys=True)
 
 
 def _fill_zeros_with_temporal_median(arr: np.ndarray) -> np.ndarray:
@@ -147,6 +266,7 @@ def predict_tile_from_arrays(
     diagnostics: Optional[Dict] = None,
     intermediates: Optional[Dict] = None,
     seed: Optional[int] = None,
+    timer: Optional["PhaseTimer"] = None,
 ) -> np.ndarray:
     """Run the full prediction pipeline on pre-loaded arrays.
 
@@ -183,6 +303,17 @@ def predict_tile_from_arrays(
     from gri_tile_pipeline.inference.frozen_graph import load_predict_graph, load_superresolve_graph
     from gri_tile_pipeline.inference.subtile_predict import mosaic_predictions
     from gri_tile_pipeline.inference.postprocessing import apply_nodata_mask
+
+    # Phase timing: _tick attributes elapsed time since the previous checkpoint
+    # to a named phase. No-op if caller passed timer=None. Keeps per-phase
+    # instrumentation low-diff without reindenting the phase bodies.
+    _last = [time.perf_counter()]
+
+    def _tick(name: str) -> None:
+        now = time.perf_counter()
+        if timer is not None:
+            timer.record(name, now - _last[0])
+        _last[0] = now
 
     # ------------------------------------------------------------------
     # 1. Convert to float32 [0, 1]
@@ -237,6 +368,8 @@ def predict_tile_from_arrays(
             sums = np.sum(clm[mins:maxs], axis=0) == 2
             clm[mins:maxs, sums] = 0.0
         logger.info(f"CLM cloud %: {np.mean(clm, axis=(1, 2))}")
+
+    _tick("preprocess_convert")
 
     # ------------------------------------------------------------------
     # 2. Align spatial dimensions: target = 2 × s2_20 shape (reference lines 800-806)
@@ -337,6 +470,8 @@ def predict_tile_from_arrays(
     if intermediates is not None:
         intermediates["s2_post_superres"] = s2_full.copy()
 
+    _tick("spatial_align_superres")
+
     # ------------------------------------------------------------------
     # 3. Remove bad timesteps, handle missing values (BEFORE cloud removal)
     #    Reference: id_missing_px + interpolate_missing_vals run before
@@ -422,6 +557,8 @@ def predict_tile_from_arrays(
 
     if intermediates is not None:
         intermediates["s2_post_cloud"] = s2_full.copy()
+
+    _tick("cloud_removal")
 
     # Normalize DEM: reference line 1084 divides by 90 (meters → ~[0, 0.5])
     dem = dem / 90.0
@@ -519,6 +656,8 @@ def predict_tile_from_arrays(
         diagnostics["s2_12_band_means"] = s2_12.mean(axis=(0, 1, 2)).tolist()
         diagnostics["indices_12_band_means"] = indices_12.mean(axis=(0, 1, 2)).tolist()
 
+    _tick("resample_indices_whittaker")
+
     # ------------------------------------------------------------------
     # 7. Prepare S1: resize to match spatial dims, take first 12 frames
     # ------------------------------------------------------------------
@@ -588,6 +727,8 @@ def predict_tile_from_arrays(
     logger.info(f"Quarterly reduction: S2 {s2_12.shape}→{s2_q.shape}, "
                 f"S1 {s1_use.shape}→{s1_q.shape}")
 
+    _tick("s1_align_quarterly")
+
     # ------------------------------------------------------------------
     # 9. Build 17-channel × 5-frame feature stack
     #    Reference: (length+1, H, W, 17) = (5, H, W, 17)
@@ -633,6 +774,8 @@ def predict_tile_from_arrays(
         diagnostics["feature_stack_channel_stats"] = ch_stats
         diagnostics["feature_stack_shape"] = feature_stack.shape
 
+    _tick("feature_stack_assembly")
+
     # ------------------------------------------------------------------
     # 8. Predict with overlapping subtiles
     #    (bright surface attenuation is applied per-subtile inside mosaic_predictions)
@@ -643,10 +786,13 @@ def predict_tile_from_arrays(
     if intermediates is not None:
         intermediates["prediction_raw"] = predictions.copy()
 
+    _tick("tf_inference")
+
     # ------------------------------------------------------------------
     # 9. Post-process: nodata masking
     # ------------------------------------------------------------------
     predictions = apply_nodata_mask(predictions, s2_12)
+    _tick("postprocess")
 
     return predictions
 
@@ -660,9 +806,16 @@ def run(
     dest: str,
     model_path: Optional[str] = None,
     debug: bool = False,
+    seed: Optional[int] = None,
+    prediction_key_override: Optional[str] = None,
+    ard_keys_override: Optional[Dict[str, str]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """Lithops entry-point for single-tile prediction.
+
+    ``prediction_key_override`` / ``ard_keys_override`` are used by parity
+    tooling to (a) avoid clobbering the production FINAL.tif and (b) read ARD
+    from non-canonical paths. Production callers leave both as None.
 
     Returns a structured dict with ``status``, ``error_message``, etc.
     """
@@ -674,22 +827,44 @@ def run(
     tag = f"{X_tile}X{Y_tile}Y"
     logger.info(f"predict_tile: {tag} year={year}")
 
+    phase_timer = PhaseTimer()
+    wallclock_start = time.perf_counter()
+
     try:
         # Set up output store
         store = from_dest(dest, region="us-east-1", profile=aws_profile)
 
-        base_key = f"{year}/raw/{X_tile}/{Y_tile}/raw"
-
         # -------------------------------------------------------
         # 1. Load ARD data
         # -------------------------------------------------------
-        logger.info(f"Loading ARD for {tag}")
-        s2_10 = _load_hkl(store, f"{base_key}/s2_10/{tag}.hkl")
-        s2_20 = _load_hkl(store, f"{base_key}/s2_20/{tag}.hkl")
-        s1 = _load_hkl(store, f"{base_key}/s1/{tag}.hkl")
-        dem = _load_hkl(store, f"{base_key}/misc/dem_{tag}.hkl")
-        clouds = _load_hkl(store, f"{base_key}/clouds/clouds_{tag}.hkl")
-        s2_dates = _load_hkl(store, f"{base_key}/misc/s2_dates_{tag}.hkl")
+        if ard_keys_override:
+            required = ("s2_10", "s2_20", "s1", "dem", "clouds", "s2_dates")
+            missing = [s for s in required if s not in ard_keys_override]
+            if missing:
+                raise ValueError(
+                    f"ard_keys_override missing sources: {missing}. "
+                    f"Required: {required}"
+                )
+            ard_keys = ard_keys_override
+            logger.info(f"Loading ARD for {tag} via override ({len(ard_keys)} keys)")
+        else:
+            base_key = f"{year}/raw/{X_tile}/{Y_tile}/raw"
+            ard_keys = {
+                "s2_10":    f"{base_key}/s2_10/{tag}.hkl",
+                "s2_20":    f"{base_key}/s2_20/{tag}.hkl",
+                "s1":       f"{base_key}/s1/{tag}.hkl",
+                "dem":      f"{base_key}/misc/dem_{tag}.hkl",
+                "clouds":   f"{base_key}/clouds/clouds_{tag}.hkl",
+                "s2_dates": f"{base_key}/misc/s2_dates_{tag}.hkl",
+            }
+            logger.info(f"Loading ARD for {tag}")
+        with timed(phase_timer, "s3_download_hkl"):
+            s2_10    = _load_hkl(store, ard_keys["s2_10"])
+            s2_20    = _load_hkl(store, ard_keys["s2_20"])
+            s1       = _load_hkl(store, ard_keys["s1"])
+            dem      = _load_hkl(store, ard_keys["dem"])
+            clouds   = _load_hkl(store, ard_keys["clouds"])
+            s2_dates = _load_hkl(store, ard_keys["s2_dates"])
 
         # -------------------------------------------------------
         # 2-8. Run prediction pipeline
@@ -699,35 +874,63 @@ def run(
 
         # Download model from S3 if needed
         if model_path.startswith("s3://"):
-            model_store = from_dest(model_path, region="us-east-1", profile=aws_profile)
-            local_model = "/tmp/models"
-            os.makedirs(local_model, exist_ok=True)
-            for obj in obs.list(model_store):
-                for meta in obj:
-                    key = meta["path"]
-                    data = obs.get(model_store, key).bytes()
-                    local_path = os.path.join(local_model, os.path.basename(key))
-                    with open(local_path, "wb") as f:
-                        f.write(data)
-            model_path = local_model
+            with timed(phase_timer, "model_download"):
+                model_store = from_dest(model_path, region="us-east-1", profile=aws_profile)
+                local_model = "/tmp/models"
+                os.makedirs(local_model, exist_ok=True)
+                for obj in obs.list(model_store):
+                    for meta in obj:
+                        key = meta["path"]
+                        data = obs.get(model_store, key).bytes()
+                        local_path = os.path.join(local_model, os.path.basename(key))
+                        with open(local_path, "wb") as f:
+                            f.write(data)
+                model_path = local_model
 
         predictions = predict_tile_from_arrays(
             s2_10, s2_20, s1, dem, clouds, s2_dates, model_path,
+            seed=seed,
+            timer=phase_timer,
         )
 
         # -------------------------------------------------------
-        # 9. Write GeoTIFF
+        # 9. Write COG + STAC sidecar
         # -------------------------------------------------------
-        out_key = f"{year}/tiles/{X_tile}/{Y_tile}/{tag}_FINAL.tif"
-        _write_geotiff(store, out_key, predictions, lon, lat)
-        logger.info(f"Wrote {out_key}")
+        if prediction_key_override:
+            out_key = prediction_key_override
+            logger.info(f"Writing prediction to override key: {out_key}")
+        else:
+            out_key = f"{year}/tiles/{X_tile}/{Y_tile}/{tag}_FINAL.tif"
+        with timed(phase_timer, "cog_write"):
+            _write_geotiff(store, out_key, predictions, lon, lat)
+            logger.info(f"Wrote {out_key}")
+
+        stac_key = out_key[:-len(".tif")] + ".json" if out_key.endswith(".tif") else out_key + ".json"
+        provenance = _build_provenance(
+            model_dir=model_path,
+            pipeline_version=kwargs.get("pipeline_version"),
+            git_sha=kwargs.get("git_sha"),
+            run_id=kwargs.get("run_id"),
+        )
+        item = _build_stac_item(
+            x_tile=X_tile, y_tile=Y_tile, year=year, lon=lon, lat=lat,
+            asset_href=os.path.basename(out_key),
+            provenance=provenance,
+        )
+        with timed(phase_timer, "stac_write"):
+            _write_stac_sidecar(store, stac_key, item)
+            logger.info(f"Wrote {stac_key}")
 
         return {
             "status": "success",
             "tile": tag,
             "year": year,
             "output_key": out_key,
+            "stac_key": stac_key,
+            "model_sha256": provenance["model"]["sha256"],
             "shape": list(predictions.shape),
+            "phase_timings": phase_timer.as_dict(),
+            "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
         }
 
     except Exception as e:
@@ -739,6 +942,8 @@ def run(
             "error_type": "permanent",
             "tile": tag,
             "year": year,
+            "phase_timings": phase_timer.as_dict(),
+            "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
         }
 
 
@@ -748,15 +953,25 @@ def run_local(
     output_path: str,
     lon: float = 0.0,
     lat: float = 0.0,
+    *,
+    x_tile: Optional[int] = None,
+    y_tile: Optional[int] = None,
+    year: Optional[int] = None,
+    pipeline_version: Optional[str] = None,
+    git_sha: Optional[str] = None,
+    run_id: Optional[str] = None,
 ) -> np.ndarray:
     """Run prediction on local ARD files (for testing/validation).
 
     Args:
         ard_dir: Directory containing raw_v2/ structure with HKL files.
         model_path: Directory containing predict_graph-172.pb.
-        output_path: Where to write the output GeoTIFF.
+        output_path: Where to write the output COG.
         lon: Tile center longitude (for GeoTIFF metadata).
         lat: Tile center latitude (for GeoTIFF metadata).
+        x_tile, y_tile, year: Tile identifiers for the STAC sidecar. When
+            any is omitted, the sidecar is skipped (tests/parity callers
+            that don't care about provenance pass lon/lat only).
 
     Returns:
         (H, W) uint8 prediction array.
@@ -782,5 +997,25 @@ def run_local(
     _write_geotiff_local(output_path, predictions, lon, lat)
     logger.info(f"Wrote {output_path} — shape={predictions.shape}, "
                 f"mean={predictions[predictions < 255].mean():.1f}")
+
+    if x_tile is not None and y_tile is not None and year is not None:
+        provenance = _build_provenance(
+            model_dir=model_path,
+            pipeline_version=pipeline_version,
+            git_sha=git_sha,
+            run_id=run_id,
+        )
+        item = _build_stac_item(
+            x_tile=x_tile, y_tile=y_tile, year=year, lon=lon, lat=lat,
+            asset_href=os.path.basename(output_path),
+            provenance=provenance,
+        )
+        sidecar_path = (
+            output_path[:-len(".tif")] + ".json"
+            if output_path.endswith(".tif")
+            else output_path + ".json"
+        )
+        _write_stac_sidecar_local(sidecar_path, item)
+        logger.info(f"Wrote {sidecar_path}")
 
     return predictions

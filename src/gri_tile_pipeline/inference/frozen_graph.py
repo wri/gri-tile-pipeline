@@ -6,6 +6,7 @@ Ported from reference ``download_and_predict_job.py`` lines 1905-1947.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -32,12 +33,17 @@ class SuperResolveSession:
     inp_bilinear: "tf.Tensor"
 
 
+@lru_cache(maxsize=None)
 def load_predict_graph(
     model_dir: str,
     size: int = 172,
     length: int = 4,
 ) -> PredictSession:
     """Load the tree-cover prediction frozen graph.
+
+    Cached per (model_dir, size, length) so warm Lambda containers reuse the
+    TF session across tiles. First invocation pays graph parse + session init;
+    subsequent invocations hit the module-level cache.
 
     Args:
         model_dir: Directory containing ``predict_graph-{size}.pb``.
@@ -74,8 +80,15 @@ def load_predict_graph(
     return PredictSession(sess=sess, logits=logits, inp=inp, length=length_tensor)
 
 
+@lru_cache(maxsize=None)
 def load_superresolve_graph(model_dir: str) -> SuperResolveSession:
     """Load the DSen2 super-resolution frozen graph.
+
+    Cached per model_dir. On cold Lambda containers the first tile pays the
+    ~55 s session init cost; every subsequent tile on the same warm container
+    reuses the cached session in ~0 s. Collapses the previously bimodal
+    ``spatial_align_superres`` phase (p50=12 s warm / p95=67 s cold) into the
+    warm-state mean.
 
     Args:
         model_dir: Directory containing ``superresolve_graph.pb``.

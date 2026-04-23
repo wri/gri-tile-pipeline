@@ -1,0 +1,78 @@
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update \
+    && apt-get install -y \
+      g++ \
+      make \
+      cmake \
+      unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG FUNCTION_DIR="/function"
+RUN mkdir -p ${FUNCTION_DIR}
+
+# Base Lambda + Lithops dependencies
+RUN pip install --upgrade --ignore-installed pip wheel six setuptools \
+    && pip install --upgrade --no-cache-dir --ignore-installed \
+        awslambdaric \
+        boto3 \
+        redis \
+        pika \
+        httplib2 \
+        requests \
+        cloudpickle \
+        ps-mem \
+        tblib \
+        psutil
+
+WORKDIR ${FUNCTION_DIR}
+
+# Lithops handler
+COPY lithops_lambda.zip ${FUNCTION_DIR}
+RUN unzip lithops_lambda.zip \
+    && rm lithops_lambda.zip \
+    && mkdir handler \
+    && touch handler/__init__.py \
+    && mv entry_point.py handler/
+
+# TF + geo/science stack pinned to exact versions matching the local venv so
+# Lambda produces byte-identical output to the golden-parity test runs.
+# Resolved together (one RUN) to prevent transitive-dep drift.
+RUN pip install --upgrade --no-cache-dir --ignore-installed \
+    "tensorflow==2.20.0" \
+    "numpy==1.26.4" \
+    "scipy==1.17.0" \
+    "scikit-image==0.26.0" \
+    "scikit-learn==1.8.0" \
+    loguru \
+    rasterio \
+    hickle \
+    pyyaml \
+    obstore \
+    bottleneck \
+    h5py
+
+# Pipeline package (inference + preprocessing modules)
+COPY src/gri_tile_pipeline/ ${FUNCTION_DIR}/gri_tile_pipeline/
+
+# Git sha of the pipeline code baked into the image. Written by the Makefile
+# before `lithops runtime build` (see infra/Makefile: docker-gitsha target).
+# Falls through to "unknown" if the Makefile wasn't used.
+COPY docker/.git_sha ${FUNCTION_DIR}/.git_sha
+
+# Frozen TF graphs for inference + super-resolution. Baked at a non-/tmp
+# path because Lambda mounts a fresh ephemeral /tmp at runtime, which would
+# shadow anything COPY'd into /tmp at build time.
+COPY models/ ${FUNCTION_DIR}/models/
+ENV MODEL_PATH=${FUNCTION_DIR}/models
+
+# Verify key imports + model presence
+RUN python -c "import tensorflow; print('TF', tensorflow.__version__)"
+RUN python -c "import numpy; print('NumPy', numpy.__version__)"
+RUN python -c "import sklearn; print('sklearn', sklearn.__version__)"
+RUN python -c "from gri_tile_pipeline.inference.normalize import normalize_subtile"
+RUN test -f ${FUNCTION_DIR}/models/predict_graph-172.pb \
+    && test -f ${FUNCTION_DIR}/models/superresolve_graph.pb
+
+ENTRYPOINT [ "/usr/local/bin/python", "-m", "awslambdaric" ]
+CMD [ "handler.entry_point.lambda_handler" ]

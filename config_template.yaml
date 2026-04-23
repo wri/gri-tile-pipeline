@@ -1,0 +1,73 @@
+# GRI Tile Pipeline — Configuration Template
+#
+# Copy this file to `config.yaml` in your working directory and edit as needed.
+# For secrets (TerraMatch bearer token, etc.), see `secrets_template.yaml`.
+#
+# Precedence (lowest to highest):
+#   1. Built-in defaults in src/gri_tile_pipeline/config.py
+#   2. LITHOPS_ENV env var  -> .lithops/<env>/ config files
+#   3. This YAML file
+#   4. Individual CLI flags  (e.g. --dest, --year, --mem)
+
+# =============================================================================
+# PIPELINE
+# =============================================================================
+
+pipeline:
+  # DuckDB parquet containing the global tile grid (X_tile, Y_tile, geometry).
+  # Used to resolve polygons -> tiles.
+  parquet_path: data/tiledb.parquet
+
+# =============================================================================
+# LITHOPS  (Lambda fan-out configs, one per region/workload)
+# =============================================================================
+# Leave these unset to use LITHOPS_ENV=<env>  ->  .lithops/<env>/config.*.yaml.
+# Override individual keys here if you need a custom path.
+
+# lithops:
+#   euc1_config:    .lithops/land-research/config.loaders-euc1.yaml
+#   usw2_config:    .lithops/land-research/config.loaders-usw2.yaml
+#   s1_usw2_config: .lithops/land-research/config.s1.yaml
+#   predict_config: .lithops/land-research/config.predict.yaml
+
+# =============================================================================
+# DOWNLOAD  (DEM + S1 + S2 ARD generation)
+# =============================================================================
+
+download:
+  runtime: ttc-loaders-dev     # Lithops runtime tag (ECR image name)
+  memory_mb: 4096              # Lambda memory; affects cost & speed
+  retries: 3
+
+# =============================================================================
+# S1 RTC  (standalone S1 download via download-s1-legacy)
+# =============================================================================
+
+s1_rtc:
+  runtime: ttc-s1-dev
+  memory_mb: 2048
+  retries: 3
+
+# =============================================================================
+# PREDICT  (TensorFlow tree-cover inference)
+# =============================================================================
+
+predict:
+  runtime: ttc-predict-dev
+  memory_mb: 6144              # Sized from CloudWatch peak ~3437 MB + headroom
+  retries: 2
+  timeout_sec: 600
+  model_path: models           # S3 URI or local path to predict_graph-172.pb
+
+# =============================================================================
+# ZONAL  (polygon statistics from prediction tiles)
+# =============================================================================
+
+zonal:
+  tile_bucket: tof-output      # S3 bucket hosting the prediction tiles
+  tile_region: us-east-1
+  small_sites_area_thresh: 0.5 # hectares; below this -> small-site handling
+  lulc_raster_path: ""         # optional LULC raster URI for error propagation
+  shift_error_enabled: false   # set true to compute 8-direction shift error
+  lookup_parquet: data/tiledb.parquet
+  lookup_csv: ""               # fallback when parquet unavailable

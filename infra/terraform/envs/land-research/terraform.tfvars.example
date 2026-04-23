@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+#
+# The AWS profile for the land-research account comes from AWS_PROFILE in your
+# environment — there is no variable for it here, so you cannot accidentally
+# commit it. Example invocation:
+#
+#   AWS_PROFILE=resto-user terraform plan -var-file=terraform.tfvars
+#
+
+
+# Uncomment to restrict cross-account write to specific prefixes:
+# output_bucket_prefixes = ["2023/raw", "2023/tiles", "2024/raw", "2024/tiles"]

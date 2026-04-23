@@ -5,7 +5,8 @@ lithops:
   euc1_config: .lithops/config.euc1.yaml
   usw2_config: .lithops/config.usw2.yaml
   s1_usw2_config: .lithops/config.s1_usw2.yaml
-  predict_config: .lithops/config.predict_usw2.yaml
+  # predict_config intentionally omitted. Set LITHOPS_ENV (e.g. datalab-test)
+  # to resolve .lithops/<env>/config.predict.yaml, or override explicitly here.
 
 download:
   runtime: ttc-loaders-dev
@@ -14,7 +15,7 @@ download:
 
 predict:
   runtime: ttc-predict-dev
-  memory_mb: 8192
+  memory_mb: 6144
   retries: 2
   timeout_sec: 600
 

@@ -5,10 +5,36 @@ Orchestrates TF inference Lambda workers.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import yaml
 from loguru import logger
+
+
+def _require_predict_config(path: str) -> None:
+    """Fail loud before fanning out if the Lithops predict config is unusable.
+
+    Catches the silent-fallback bug where an unset ``LITHOPS_ENV`` resolved to a
+    legacy us-west-2 config and quietly deployed Lambdas in the wrong region.
+    """
+    if not path:
+        env = os.environ.get("LITHOPS_ENV", "")
+        msg = (
+            "predict_config is unset. Set LITHOPS_ENV (e.g. `export "
+            "LITHOPS_ENV=datalab-test`) so the rendered `.lithops/<env>/"
+            "config.predict.yaml` is resolved, or pass --predict-cfg explicitly."
+        )
+        if env:
+            msg += f" (LITHOPS_ENV={env!r} but no rendered predict config found.)"
+        raise RuntimeError(msg)
+    if not Path(path).is_file():
+        raise FileNotFoundError(
+            f"predict_config points to {path!r} which does not exist. "
+            "If you set LITHOPS_ENV, run `make -C infra render ENV=<env>` to "
+            "generate the rendered Lithops config."
+        )
 
 from gri_tile_pipeline.config import PipelineConfig
 from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
@@ -45,6 +71,7 @@ def run_predict(
     skip_existing: bool = False,
     report_dir: str = "job_reports",
     debug: bool = False,
+    run_id: str | None = None,
 ) -> JobTracker:
     """Fan out prediction jobs via Lithops.
 
@@ -58,6 +85,7 @@ def run_predict(
     memory_mb = memory_mb or cfg.predict.memory_mb
     retries = retries if retries is not None else cfg.predict.retries
     predict_cfg_path = predict_cfg or cfg.lithops.predict_config
+    _require_predict_config(predict_cfg_path)
 
     tiles = read_tiles_csv(tiles_csv)
     if not tiles:
@@ -87,6 +115,7 @@ def run_predict(
             "dest": dest,
             "model_path": model_path,
             "debug": debug,
+            "run_id": run_id,
         }
         for t in tiles
     ]
@@ -127,6 +156,7 @@ def run_predict_local(
     debug: bool = False,
     max_workers: int = 1,
     aws_profile: str | None = None,
+    run_id: str | None = None,
 ) -> JobTracker:
     """Run prediction locally — no Lithops.
 
@@ -163,6 +193,7 @@ def run_predict_local(
             "model_path": model_path,
             "debug": debug,
             "aws_profile": aws_profile,
+            "run_id": run_id,
         }
         for t in tiles
     ]

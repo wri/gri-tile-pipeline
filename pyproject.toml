@@ -15,6 +15,7 @@ dependencies = [
     "duckdb>=1.5.1",
     "obstore>=0.3",
     "lithops==3.6.1",
+    "requests>=2.28",
 ]
 
 [project.optional-dependencies]

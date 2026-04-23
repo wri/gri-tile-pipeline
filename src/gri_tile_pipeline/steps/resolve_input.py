@@ -5,6 +5,7 @@ Supported input types:
   - **request CSV**: project_id, plantstart_year columns -> query geoparquet -> tiles
   - **polygon file**: GeoJSON, GeoPackage, etc. -> spatial join against tile grid
   - **JSON request**: legacy inbound JSON format -> DuckDB tile resolution
+  - **short name**: bare TerraMatch project identifier (e.g. GHA_22_INEC) -> geoparquet
 """
 
 from __future__ import annotations
@@ -31,10 +32,24 @@ class ResolvedInput:
 TILES_CSV_COLUMNS = {"Year", "X", "Y", "X_tile", "Y_tile"}
 REQUEST_CSV_COLUMNS = {"project_id", "plantstart_year"}
 
+# Anything with a recognizable file extension or a path separator must refer
+# to a real file. Bare tokens like "GHA_22_INEC" are treated as short names.
+_FILE_EXTENSIONS = {
+    ".csv", ".json", ".geojson", ".gpkg", ".shp", ".parquet", ".geoparquet",
+}
+
 
 def detect_input_type(path: str) -> str:
     """Detect the input file type from extension and column headers."""
     ext = os.path.splitext(path)[1].lower()
+
+    if not os.path.exists(path):
+        # Looks like a path / known extension but the file is missing -> error out here
+        # so callers get a clear message rather than a short-name lookup.
+        if os.sep in path or "/" in path or ext in _FILE_EXTENSIONS:
+            raise FileNotFoundError(f"Input file not found: {path}")
+        # Otherwise treat as a short_name (e.g. "GHA_22_INEC").
+        return "short_name"
 
     if ext == ".json":
         return "json_request"
@@ -66,25 +81,62 @@ def detect_input_type(path: str) -> str:
 
 
 def resolve_to_tiles(
-    input_path: str,
+    input_path: str | None,
     cfg,
     *,
     year: int | None = None,
     year_from_plantstart: bool = False,
     geoparquet: str | None = None,
+    where_sql: str | None = None,
+    poly_uuids: list[str] | None = None,
+    cohorts: list[str] | None = None,
+    project_ids: list[str] | None = None,
+    short_names: list[str] | None = None,
+    framework_keys: list[str] | None = None,
 ) -> ResolvedInput:
     """Resolve any supported input format to a list of tiles.
 
     Args:
-        input_path: Path to the input file.
+        input_path: Path to the input file. ``None`` is allowed when a
+            geoparquet filter (``where_sql`` / ``poly_uuids`` / ``cohorts`` /
+            ``project_ids`` / ``short_names`` / ``framework_keys``) is given.
         cfg: PipelineConfig instance.
-        year: Explicit prediction year (required for polygon file input).
+        year: Explicit prediction year (required for polygon file input and
+            for filter routes when plantstart is missing).
         year_from_plantstart: Derive year as plantstart - 1 from polygon data.
-        geoparquet: Path to TerraMatch geoparquet (for request CSV input).
+        geoparquet: Path to TerraMatch geoparquet (for request CSV, short_name,
+            or filter input).
+        where_sql, poly_uuids, cohorts, project_ids, short_names,
+            framework_keys: Geoparquet filter inputs. When any is set,
+            ``input_path`` is ignored.
 
     Returns:
         ResolvedInput with tiles list and optional polygon data.
     """
+    has_filter = bool(
+        where_sql or poly_uuids or cohorts
+        or project_ids or short_names or framework_keys
+    )
+
+    if has_filter:
+        geoparquet = geoparquet or "temp/tm.geoparquet"
+        return _resolve_by_filter(
+            geoparquet, cfg,
+            year=year,
+            where_sql=where_sql,
+            poly_uuids=poly_uuids,
+            cohorts=cohorts,
+            project_ids=project_ids,
+            short_names=short_names,
+            framework_keys=framework_keys,
+        )
+
+    if input_path is None:
+        raise ValueError(
+            "Provide an input_path or at least one filter "
+            "(where_sql / poly_uuids / cohorts / project_ids / short_names / framework_keys)"
+        )
+
     input_type = detect_input_type(input_path)
     logger.info(f"Detected input type: {input_type} for {input_path}")
 
@@ -103,7 +155,51 @@ def resolve_to_tiles(
             input_path, cfg, year=year, year_from_plantstart=year_from_plantstart,
         )
 
+    if input_type == "short_name":
+        geoparquet = geoparquet or "temp/tm.geoparquet"
+        return _resolve_short_name(input_path, geoparquet, cfg, year=year)
+
     raise ValueError(f"Unsupported input type: {input_type}")
+
+
+def _resolve_by_filter(
+    geoparquet: str,
+    cfg,
+    *,
+    year: int | None,
+    where_sql: str | None,
+    poly_uuids: list[str] | None,
+    cohorts: list[str] | None,
+    project_ids: list[str] | None,
+    short_names: list[str] | None,
+    framework_keys: list[str] | None,
+) -> ResolvedInput:
+    from gri_tile_pipeline.steps.project_e2e import _extract_by_filter
+    from gri_tile_pipeline.tiles.tile_lookup import identify_tiles_for_polygons
+
+    gdf, geojson_path, meta = _extract_by_filter(
+        geoparquet,
+        where_sql=where_sql,
+        poly_uuids=poly_uuids,
+        cohorts=cohorts,
+        project_ids=project_ids,
+        short_names=short_names,
+        framework_keys=framework_keys,
+        year_override=year,
+    )
+    tiles = identify_tiles_for_polygons(
+        gdf,
+        lookup_parquet=cfg.zonal.lookup_parquet or cfg.parquet_path,
+        lookup_csv=cfg.zonal.lookup_csv,
+    )
+    logger.info(f"Resolved {len(tiles)} tiles from {meta['n_polygons']} polygons (filter={meta['label']})")
+    return ResolvedInput(
+        tiles=tiles,
+        input_type="filter",
+        polygons_gdf=gdf,
+        polygons_path=str(geojson_path),
+        metadata=meta,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +247,28 @@ def _resolve_request_csv(path: str, geoparquet: str, cfg) -> ResolvedInput:
     return ResolvedInput(
         tiles=tiles,
         input_type="request_csv",
+        polygons_gdf=gdf,
+        polygons_path=str(geojson_path),
+        metadata=meta,
+    )
+
+
+def _resolve_short_name(
+    short_name: str, geoparquet: str, cfg, *, year: int | None
+) -> ResolvedInput:
+    from gri_tile_pipeline.steps.project_e2e import _extract_project
+    from gri_tile_pipeline.tiles.tile_lookup import identify_tiles_for_polygons
+
+    gdf, geojson_path, meta = _extract_project(short_name, geoparquet, year_override=year)
+    tiles = identify_tiles_for_polygons(
+        gdf,
+        lookup_parquet=cfg.zonal.lookup_parquet or cfg.parquet_path,
+        lookup_csv=cfg.zonal.lookup_csv,
+    )
+    logger.info(f"Resolved {len(tiles)} tiles from {meta['n_polygons']} polygons ({short_name})")
+    return ResolvedInput(
+        tiles=tiles,
+        input_type="short_name",
         polygons_gdf=gdf,
         polygons_path=str(geojson_path),
         metadata=meta,

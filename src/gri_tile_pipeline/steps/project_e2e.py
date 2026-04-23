@@ -232,6 +232,120 @@ def _extract_from_request_csv(
     return gdf, out, metadata
 
 
+def _extract_by_filter(
+    geoparquet: str,
+    *,
+    where_sql: str | None = None,
+    poly_uuids: list[str] | None = None,
+    cohorts: list[str] | None = None,
+    project_ids: list[str] | None = None,
+    short_names: list[str] | None = None,
+    framework_keys: list[str] | None = None,
+    year_override: int | None = None,
+) -> tuple[gpd.GeoDataFrame, Path, dict]:
+    """Extract polygons from *geoparquet* using any combination of filters.
+
+    Used by ``run-project`` when the user provides ``--where`` / ``--poly-uuid`` /
+    ``--cohort`` rather than a short_name or request CSV. Re-uses the same
+    filter builder as the ``report`` command so behaviour stays consistent.
+    """
+    from gri_tile_pipeline.duckdb_utils import connect_with_spatial
+    from gri_tile_pipeline.reporting.status_report import _build_filter
+
+    poly_uuids = poly_uuids or []
+    cohorts = cohorts or []
+    project_ids = project_ids or []
+    short_names = short_names or []
+    framework_keys = framework_keys or []
+
+    con = connect_with_spatial()
+    try:
+        where, params = _build_filter(
+            con, geoparquet, None,
+            project_ids, short_names, framework_keys,
+            poly_uuids=poly_uuids, cohorts=cohorts, where_sql=where_sql,
+        )
+        df = con.execute(
+            f"SELECT *, ST_AsWKB(geom) AS __wkb FROM read_parquet($1) p WHERE {where}",
+            params,
+        ).df()
+    finally:
+        con.close()
+
+    if df.empty:
+        raise ValueError(
+            "No polygons matched the filter. Check the filter values "
+            "(where/poly_uuid/cohort/short_name/project_id/framework_key)."
+        )
+
+    gdf = _gdf_from_duckdb(df)
+
+    if year_override is not None:
+        gdf["pred_year"] = year_override
+    else:
+        def _derive_year(ps):
+            if ps is not None and hasattr(ps, "year"):
+                return ps.year - 1
+            return None
+        gdf["pred_year"] = gdf["plantstart"].apply(_derive_year)
+
+    invalid = gdf["pred_year"].isna()
+    if invalid.all():
+        raise ValueError(
+            "No polygons have a valid plantstart — pass --year to override."
+        )
+    if invalid.any():
+        logger.warning(f"{invalid.sum()} polygon(s) have no valid plantstart — dropping")
+        gdf = gdf[~invalid].copy()
+    gdf["pred_year"] = gdf["pred_year"].astype(int)
+
+    year_counts = Counter(gdf["pred_year"])
+    n_with_ttc, n_correct_yr = _ttc_coverage(gdf)
+
+    # Human-readable label describing the filter.
+    label_parts = []
+    if short_names:
+        label_parts.append("+".join(short_names) if len(short_names) <= 3 else f"{len(short_names)}sn")
+    if project_ids:
+        label_parts.append(f"{len(project_ids)}pid")
+    if framework_keys:
+        label_parts.append("+".join(framework_keys))
+    if poly_uuids:
+        label_parts.append(f"{len(poly_uuids)}uuids")
+    if cohorts:
+        label_parts.append("+".join(cohorts))
+    if where_sql:
+        label_parts.append("where")
+    label = "_".join(label_parts) or "filter"
+
+    metadata = {
+        "label": label,
+        "n_polygons": len(gdf),
+        "country": gdf["country"].iloc[0] if "country" in gdf.columns and len(gdf) else "mixed",
+        "framework_key": (
+            gdf["framework_key"].iloc[0]
+            if "framework_key" in gdf.columns and len(gdf) else "mixed"
+        ),
+        "year_counts": dict(year_counts),
+        "n_with_ttc": n_with_ttc,
+        "n_correct_yr": n_correct_yr,
+        "n_missing_ttc": len(gdf) - n_with_ttc,
+        "filter": {
+            "where_sql": where_sql,
+            "poly_uuids": poly_uuids,
+            "cohorts": cohorts,
+            "project_ids": project_ids,
+            "short_names": short_names,
+            "framework_keys": framework_keys,
+        },
+    }
+
+    out = Path(tempfile.mkdtemp(prefix="ttc_filter_")) / f"{label}.geojson"
+    gdf.to_file(out, driver="GeoJSON")
+
+    return gdf, out, metadata
+
+
 # ---------------------------------------------------------------------------
 # Step 3: Identify required tiles via per-polygon spatial join
 # ---------------------------------------------------------------------------
@@ -279,12 +393,19 @@ def run_project_pipeline(
     geoparquet: str = "temp/tm.geoparquet",
     year: int | None = None,
     output: str | None = None,
+    local: bool = False,
     max_workers: int = 1,
     skip_existing: bool = True,
     lulc_raster: str | None = None,
     missing_only: bool = False,
     check_only: bool = False,
     dry_run: bool = False,
+    where_sql: str | None = None,
+    poly_uuids: list[str] | None = None,
+    cohorts: list[str] | None = None,
+    project_ids: list[str] | None = None,
+    short_names: list[str] | None = None,
+    framework_keys: list[str] | None = None,
 ) -> dict:
     """Run the full pipeline for a TerraMatch project.
 
@@ -327,15 +448,53 @@ def run_project_pipeline(
         Summary dict with keys: label, n_polygons, n_tiles,
         n_tiles_generated, output_path, exit_code.
     """
-    if not short_name and not input_csv:
-        raise ValueError("Provide either short_name or input_csv")
-    if short_name and input_csv:
-        raise ValueError("Provide short_name or input_csv, not both")
+    has_filter = bool(
+        where_sql or poly_uuids or cohorts
+        or project_ids or short_names or framework_keys
+    )
+    sources_provided = sum([bool(short_name), bool(input_csv), has_filter])
+    if sources_provided == 0:
+        raise ValueError(
+            "Provide short_name, input_csv, or at least one filter "
+            "(--where / --poly-uuid / --cohort / --project-id / --short-name / --framework-key)"
+        )
+    if sources_provided > 1:
+        raise ValueError(
+            "Provide exactly one of: short_name, input_csv, or filter flags"
+        )
+
+    # Announce execution mode up-front so it's never ambiguous whether the
+    # pipeline will run on Lambda or the caller's machine. Silent local-mode
+    # fallback was confusing: the user would kick off run-project expecting
+    # cloud execution and not realize their laptop was doing all the work.
+    if local:
+        logger.info(
+            f"Mode: LOCAL (max_workers={max_workers}) — workers run in this process. "
+            "Pass no --local to fan out via Lithops/Lambda."
+        )
+    else:
+        lithops_env = os.environ.get("LITHOPS_ENV", "<unset>")
+        logger.info(
+            f"Mode: LITHOPS / AWS Lambda (LITHOPS_ENV={lithops_env}, "
+            f"predict runtime={cfg.predict.runtime}). Pass --local to run in-process instead."
+        )
 
     # ── Step 1: Extract project polygons ──
     if input_csv:
         logger.info(f"Step 1/7: Extracting polygons from request CSV '{input_csv}'")
         gdf, geojson_path, meta = _extract_from_request_csv(input_csv, geoparquet)
+    elif has_filter:
+        logger.info(f"Step 1/7: Extracting polygons from {geoparquet} via filter")
+        gdf, geojson_path, meta = _extract_by_filter(
+            geoparquet,
+            where_sql=where_sql,
+            poly_uuids=poly_uuids,
+            cohorts=cohorts,
+            project_ids=project_ids,
+            short_names=short_names,
+            framework_keys=framework_keys,
+            year_override=year,
+        )
     else:
         logger.info(f"Step 1/7: Extracting project '{short_name}' from {geoparquet}")
         gdf, geojson_path, meta = _extract_project(short_name, geoparquet, year_override=year)
@@ -486,13 +645,21 @@ def run_project_pipeline(
 
             # ── Step 5: Download ARD ──
             logger.info(f"Step 5/7: Downloading ARD for {len(missing)} tiles")
-            from gri_tile_pipeline.steps.download_ard import run_download_ard_local
+            if local:
+                from gri_tile_pipeline.steps.download_ard import run_download_ard_local
 
-            dl_tracker = run_download_ard_local(
-                tiles_csv, dest, cfg,
-                skip_existing=skip_existing,
-                max_workers=max_workers,
-            )
+                dl_tracker = run_download_ard_local(
+                    tiles_csv, dest, cfg,
+                    skip_existing=skip_existing,
+                    max_workers=max_workers,
+                )
+            else:
+                from gri_tile_pipeline.steps.download_ard import run_download_ard
+
+                dl_tracker = run_download_ard(
+                    tiles_csv, dest, cfg,
+                    skip_existing=skip_existing,
+                )
             dl_exit = exit_code_from_tracker(dl_tracker)
             if dl_exit == ExitCode.TOTAL_FAILURE:
                 logger.error("All ARD downloads failed")
@@ -521,13 +688,21 @@ def run_project_pipeline(
                 predict_csv = tiles_csv + ".predict.csv"
                 write_tiles_csv(predict_csv, ready)
 
-                from gri_tile_pipeline.steps.predict import run_predict_local
+                if local:
+                    from gri_tile_pipeline.steps.predict import run_predict_local
 
-                pred_tracker = run_predict_local(
-                    predict_csv, dest, cfg,
-                    skip_existing=skip_existing,
-                    max_workers=max_workers,
-                )
+                    pred_tracker = run_predict_local(
+                        predict_csv, dest, cfg,
+                        skip_existing=skip_existing,
+                        max_workers=max_workers,
+                    )
+                else:
+                    from gri_tile_pipeline.steps.predict import run_predict
+
+                    pred_tracker = run_predict(
+                        predict_csv, dest, cfg,
+                        skip_existing=skip_existing,
+                    )
                 pred_exit = exit_code_from_tracker(pred_tracker)
                 if pred_exit == ExitCode.TOTAL_FAILURE:
                     logger.error("All prediction jobs failed")

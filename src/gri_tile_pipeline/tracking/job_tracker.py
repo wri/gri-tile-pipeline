@@ -16,10 +16,14 @@ from gri_tile_pipeline.tracking.job_result import JobResult
 class JobTracker:
     """Centralized job tracking and reporting."""
 
-    def __init__(self, output_dir: str = "job_reports"):
+    def __init__(self, output_dir: str = "job_reports", *,
+                 run_id: Optional[str] = None,
+                 step_name: Optional[str] = None):
         self.output_dir = output_dir
         self.results: List[JobResult] = []
         self.start_time = datetime.now()
+        self.run_id = run_id
+        self.step_name = step_name
         os.makedirs(output_dir, exist_ok=True)
 
     def add_result(self, result: JobResult) -> None:
@@ -28,6 +32,151 @@ class JobTracker:
     # ------------------------------------------------------------------
     # Report generation
     # ------------------------------------------------------------------
+
+    def save_run_report(self, run_history_dir: str) -> str:
+        """Write canonical run-history files under ``<run_history_dir>/<run_id>/``.
+
+        Files written:
+          * ``summary.json`` — counts + metadata (consumed by `runs list/show`).
+          * ``jobs.csv``   — one row per JobResult.
+          * ``failed.csv`` — tiles whose jobs did not fully succeed (for retry).
+          * ``report.md``  — human-readable rollup.
+
+        Returns the directory path.
+        """
+        run_id = self.run_id or self.start_time.strftime("%Y%m%dT%H%M%S")
+        run_dir = os.path.join(run_history_dir, run_id)
+        os.makedirs(run_dir, exist_ok=True)
+
+        total = len(self.results)
+        n_success = sum(1 for r in self.results if r.status == "success")
+        n_partial = sum(1 for r in self.results if r.status == "partial")
+        n_failed = total - n_success - n_partial
+
+        by_task: Dict[str, Dict[str, int]] = {}
+        for r in self.results:
+            bucket = by_task.setdefault(
+                r.task_type,
+                {"success": 0, "partial": 0, "failed": 0, "error": 0, "infra_error": 0},
+            )
+            bucket[r.status] = bucket.get(r.status, 0) + 1
+
+        # Step name: explicit override > dominant task_type
+        step = self.step_name
+        if step is None and by_task:
+            step = max(by_task, key=lambda k: sum(by_task[k].values())).lower()
+
+        end_time = datetime.now()
+        duration = (end_time - self.start_time).total_seconds()
+
+        failed_tiles = [r.tile_info for r in self.results
+                        if r.status not in ("success", "partial") and r.tile_info]
+        # Deduplicate on (year, X_tile, Y_tile): one row per tile, not per task.
+        seen: set[tuple] = set()
+        deduped_failed: List[Dict[str, Any]] = []
+        for ti in failed_tiles:
+            key = (ti.get("year"), ti.get("X_tile"), ti.get("Y_tile"))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped_failed.append(ti)
+
+        phase_aggregates = self._phase_aggregates()
+
+        summary = {
+            "run_id": run_id,
+            "step": step,
+            "start_time": self.start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "duration_sec": duration,
+            "n_jobs": total,
+            "n_success": n_success,
+            "n_partial": n_partial,
+            "n_failed": n_failed,
+            "by_task_type": by_task,
+            "n_failed_tiles": len(deduped_failed),
+        }
+        if phase_aggregates:
+            summary["phase_percentiles_sec"] = phase_aggregates
+        with open(os.path.join(run_dir, "summary.json"), "w") as f:
+            json.dump(summary, f, indent=2, default=str)
+
+        self._save_csv_summary(os.path.join(run_dir, "jobs.csv"))
+        self._write_failed_tiles_csv(os.path.join(run_dir, "failed.csv"), deduped_failed)
+        self._save_text_report(os.path.join(run_dir, "report.md"))
+        if phase_aggregates:
+            self._save_phase_stats_csv(os.path.join(run_dir, "phase_stats.csv"))
+
+        logger.info(f"Run report -> {run_dir}")
+        return run_dir
+
+    def _phase_rows(self) -> List[Tuple[Dict[str, Any], Dict[str, float], Optional[float]]]:
+        """Return ``(tile_info, phase_timings, wallclock)`` for each tile with phase data."""
+        rows: List[Tuple[Dict[str, Any], Dict[str, float], Optional[float]]] = []
+        for r in self.results:
+            data = r.result_data or {}
+            phases = data.get("phase_timings")
+            if not isinstance(phases, dict) or not phases:
+                continue
+            wallclock = data.get("wallclock_sec")
+            rows.append((r.tile_info, {k: float(v) for k, v in phases.items()}, wallclock))
+        return rows
+
+    def _phase_aggregates(self) -> Dict[str, Dict[str, float]]:
+        """Compute p50/p95/p99 + mean per phase across all tiles with phase data."""
+        rows = self._phase_rows()
+        if not rows:
+            return {}
+        all_phases: Dict[str, List[float]] = {}
+        for _, phases, _ in rows:
+            for name, sec in phases.items():
+                all_phases.setdefault(name, []).append(sec)
+
+        def _pct(vals: List[float], q: float) -> float:
+            if not vals:
+                return 0.0
+            vs = sorted(vals)
+            idx = min(int(round(q * (len(vs) - 1))), len(vs) - 1)
+            return round(vs[idx], 4)
+
+        return {
+            name: {
+                "n": len(vals),
+                "mean": round(sum(vals) / len(vals), 4),
+                "p50": _pct(vals, 0.50),
+                "p95": _pct(vals, 0.95),
+                "p99": _pct(vals, 0.99),
+            }
+            for name, vals in sorted(all_phases.items())
+        }
+
+    def _save_phase_stats_csv(self, path: str) -> None:
+        """Write one row per tile, one column per phase, plus wallclock."""
+        rows = self._phase_rows()
+        if not rows:
+            return
+        all_phase_names: List[str] = sorted({name for _, phases, _ in rows for name in phases})
+        fieldnames = ["year", "X_tile", "Y_tile", "wallclock_sec"] + all_phase_names
+        with open(path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for tile_info, phases, wallclock in rows:
+                row: Dict[str, Any] = {
+                    "year": tile_info.get("year"),
+                    "X_tile": tile_info.get("X_tile"),
+                    "Y_tile": tile_info.get("Y_tile"),
+                    "wallclock_sec": wallclock,
+                }
+                for name in all_phase_names:
+                    row[name] = phases.get(name)
+                writer.writerow(row)
+
+    def _write_failed_tiles_csv(self, path: str, tiles: List[Dict[str, Any]]) -> None:
+        """Write failed tiles in tiles-CSV format (year, lon, lat, X_tile, Y_tile)."""
+        from gri_tile_pipeline.tiles.csv_io import write_tiles_csv
+        # csv_io.write_tiles_csv expects tile dicts with known keys; missing values
+        # become empty strings, which `read_tiles_csv` tolerates on reload.
+        write_tiles_csv(path, tiles or [])
 
     def save_reports(self) -> None:
         """Save JSON, CSV, text, and failed-jobs reports."""

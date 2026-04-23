@@ -3,6 +3,9 @@ __pycache__/
 .DS_Store
 .venv/
 .env
+
+# Local secrets (TerraMatch token, etc.) — never commit.
+secrets.yaml
 .env.local
 .env.development.local
 .env.test.local
@@ -10,3 +13,31 @@ __pycache__/
 .env.development
 .env.test
 .env.production
+
+reference/
+example/
+temp/
+output/
+job_reports/
+benchmarks/
+
+.pc_sas_token_cache.json
+
+.python-version
+
+.claude/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# Rendered Lithops configs (produced by infra/lithops/render.py)
+.lithops/land-research/
+.lithops/datalab/
+
+# Build-time provenance written by infra/Makefile before the predict image build.
+docker/.git_sha
