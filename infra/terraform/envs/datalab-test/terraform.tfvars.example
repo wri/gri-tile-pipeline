@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (gitignored). Defaults in variables.tf are fine
+# for most runs. Override bucket_prefix or role_name here if you need a
+# second concurrent test env.
+#
+# Example invocation:
+#   AWS_PROFILE=dl-user terraform plan -var-file=terraform.tfvars
+
+# bucket_prefix = "gri-ttc-dltest-state"
+# role_name     = "lithops-execution-role-dltest"

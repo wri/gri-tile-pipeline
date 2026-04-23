@@ -1,129 +1,157 @@
-## GRI Tile Pipeline
+# GRI Tile Pipeline
 
-Pipeline for generating ARD tiles for TTC. This repository currently covers the ARD generation steps (DEM, S1, S2) and orchestrates parallel execution on AWS Lambda via Lithops. Final model inference is intended to be integrated in a subsequent phase.
+Tree tree-cover (TTC) statistics for restoration polygons, end to end.
 
-## File reference
+Given a set of polygons — whether a TerraMatch project, a filter on
+`tm.geoparquet`, or your own GeoJSON — this library resolves the tiles
+they cover, downloads the ARD that's missing, runs TF inference on AWS
+Lambda, computes per-polygon zonal statistics, and optionally patches the
+results back to the TerraMatch database.
 
-- The `lithops_job_tracker.py` script is the entrypoint for the ARD generation job.
-- The `loaders/*` modules are the Lambda entrypoints for DEM, S1, and S2 ARD generation.
-- The `scripts/handle_inbound_request.py` script converts an inbound JSON request into a tiles CSV consumed by `lithops_job_tracker.py`.
-- The `.lithops/*.yaml` files contain per-environment and per-region Lithops configuration.
+Everything is exposed as a single CLI: `gri-ttc`.
 
-## Prerequisites
+---
 
-- AWS account with credentials configured locally (e.g., via AWS CLI or environment variables).
-- Access to S3 buckets where outputs will be written.
-- Python (recommend 3.11) for local orchestration.
-- `uv` for local environment management.
+## At a glance
 
-Optional (for building Lambda runtime):
-- Docker installed and available on your PATH.
-
-
-## Local setup (uv)
-
-This local environment is used for orchestration and helper scripts. The Lambda execution environment is built separately via Lithops runtime builds (see next section).
-
-```bash
-# Create and activate a local environment
-uv venv
-source .venv/bin/activate
-
-# Install the minimal set of tools used by orchestration scripts
-# (adjust if your environment requires more)
-uv pip install lithops pyyaml boto3 pandas
+```
+input (project / filter / polygon file)
+  └─►  gri-ttc resolve      →  tiles.csv
+       └─►  gri-ttc check   →  missing.csv
+            └─►  gri-ttc run --steps download,predict,stats
+                 └─►  results.csv
+                      └─►  gri-ttc tm-patch  →  TerraMatch indicators
 ```
 
+Every step is idempotent, writes to S3 at deterministic keys, and
+`--skip-existing` avoids redoing work.
 
-## AWS and Lithops configuration
+---
 
-We use two AWS regions to colocate compute with data sources:
-- `eu-central-1`: DEM and S1 tasks
-- `us-west-2`: S2 tasks
-
-The repository includes three configuration files under `.lithops/`:
-- `config.euc1.yaml`: Configuration for `eu-central-1`
-- `config.usw2.yaml`: Configuration for `us-west-2`
-- `config.local.yaml`: Optional local execution settings
-
-Set the Lambda runtime name/tag to `ttc-loaders-dev` (customize if needed) and verify AWS credentials and permissions to invoke Lambda and access S3.
-
-
-## Build the Lithops runtime (Docker → AWS Lambda)
-
-Build a Lambda-compatible Lithops runtime with the Python dependencies defined in `docker/PipDockerfile`.
+## Install
 
 ```bash
-# Build for us-west-2 (S2)
-lithops runtime build -f docker/PipDockerfile -b aws_lambda -c .lithops/config.usw2.yaml ttc-loaders-dev
-
-# Build for eu-central-1 (DEM, S1)
-lithops runtime build -f docker/PipDockerfile -b aws_lambda -c .lithops/config.euc1.yaml ttc-loaders-dev
+uv sync --extra all        # library + loaders + predict + zonal + dev
 ```
 
-If you update dependencies, rebuild the runtimes. Confirm the runtime name configured in both `.lithops` files matches `ttc-loaders-dev`.
+Python 3.11+ is required.
 
-
-## Generate the tiles CSV
-
-Use `scripts/handle_inbound_request.py` to translate an inbound request JSON into a tiles CSV consumed by the job tracker. A common pattern is to save the output as something like `example_tiles_to_process.csv`.
-
-The CSV produced for the job tracker must contain the following columns:
-- `Year`, `X`, `Y`, `Y_tile`, `X_tile`
-
-Example:
+## Set up credentials
 
 ```bash
-python scripts/handle_inbound_request.py input.json --parquet data/tiledb.parquet > example_tiles_to_process.csv
+cp config_template.yaml  config.yaml
+cp secrets_template.yaml secrets.yaml   # gitignored
+# edit secrets.yaml: paste your TerraMatch bearer token (for tm-patch only)
 ```
 
-Notes:
-- The `--parquet data/tiledb.parquet` argument points to the parquet table used to map requests to tiles.
-- See `scripts/handle_inbound_request.py` for additional options and input schema expectations.
-
-
-## Run ARD jobs on AWS Lambda
-
-Use `lithops_job_tracker.py` to fan out DEM + S1 (in `eu-central-1`) and S2 (in `us-west-2`) jobs. The script prints a pre-flight cost estimate based on historical runtimes and will prompt for confirmation before submitting any jobs.
+## Verify the setup
 
 ```bash
-python lithops_job_tracker.py example_tiles_to_process.csv \
-  --dest s3://dev-ttc-lithops-usw2 \
-  --plot
+gri-ttc doctor                    # checks config, AWS creds, Lithops env, geoparquet
+gri-ttc doctor --check-tm         # also pings the staging TerraMatch API
 ```
 
-Key flags:
-- `--dest`: Required. S3 destination prefix for outputs (e.g., `s3://bucket/prefix`).
-- `--mem`: Optional. Lambda memory in MB (default 4096). Affects cost and speed.
-- `--retries`: Optional. Automatic retries per task (default 3).
-- `--plot`: Optional. Saves runtime plots into `plots/` for each region.
-- `--report-dir`: Optional. Directory for job reports (default `job_reports`).
+Fix whatever `doctor` flags before running real jobs.
 
-What to expect:
-- A pre-flight cost estimate is printed (using `$0.00001667` per GB-second, with average durations `S1=14s`, `S2=62s`, `DEM=9s` and your specified memory). This is a rough estimate based on trial runs.
-- An interactive prompt asks to proceed: type `y` to continue.
-- Jobs are submitted to Lambda and tracked. At the end, reports are saved and a summary is printed.
+---
 
-Outputs:
-- `job_reports/` contains a JSON report, CSV summary, and a text report summarizing successes and failures.
-- `plots/` includes per-region execution timelines if `--plot` is used.
-- ARD outputs are written under your `--dest` prefix in S3.
+## Your first run
 
-Planned enhancement:
-- Before creating tasks, we plan to add an file check to skip jobs whose outputs already exist at `--dest`. This will likely compute expected keys and use `head_object` (S3) or `os.path.exists` (local) to filter tiles, and have an overwrite flag.
+All four commands below default to running on AWS Lambda via Lithops —
+export your creds first and the first log line confirms the mode:
 
+```bash
+export AWS_PROFILE=<land_research_aws_acct> LITHOPS_ENV=land-research
+```
 
+Pass `--local` on any command to run workers in-process instead.
 
+### Full end-to-end for a TerraMatch short_name
+
+```bash
+gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes
+```
+
+Resolves tiles → downloads ARD → predicts → computes polygon stats →
+writes `results.csv`. Add `--tm-patch --tm-patch-project-id <TM_PROJ>`
+to push outputs back to TerraMatch (dry-run by default; `--tm-patch-apply`
+sends).
+
+### Full end-to-end for an arbitrary polygon file
+
+`run-project` is geoparquet-only. For an external polygon file
+(GeoJSON / GPKG / Shapefile / Parquet in EPSG:4326), use `resolve` +
+`run`:
+
+```bash
+gri-ttc resolve polygons.geojson --year 2023 -o tiles.csv
+gri-ttc run tiles.csv --dest s3://tof-output \
+    --steps download,predict,stats \
+    --polygons polygons.geojson --year 2023 --yes
+```
+
+### Availability check for a short_name (no compute)
+
+```bash
+gri-ttc run-project GHA_22_INEC --dest s3://tof-output --check-only --yes
+```
+
+Runs steps 1–4 (extract polygons → TTC coverage → identify tiles →
+check S3) and writes `temp/<label>_missing_tiles.csv`. Supports
+`--year N` to override the plantstart-derived year.
+
+### Availability check for an arbitrary polygon file
+
+```bash
+gri-ttc check polygons.geojson --year 2023 \
+    --dest s3://tof-output --check-type predictions -o missing.csv
+```
+
+See **[docs/quickstart.md](docs/quickstart.md)** for a fuller walk-through
+and **[docs/cli_workflows.md](docs/cli_workflows.md)** for every flag.
+
+---
+
+## Common tasks
+
+| I want to…                                               | Doc                                                        |
+| -------------------------------------------------------- | ---------------------------------------------------------- |
+| Install, verify, and run my first project                | [quickstart.md](docs/quickstart.md)                        |
+| Understand the pipeline end to end                       | [system_overview.md](docs/system_overview.md)              |
+| Stand up the AWS/Terraform/Lithops infrastructure        | [setup.md](docs/setup.md)                                  |
+| See every CLI command with examples                      | [cli_workflows.md](docs/cli_workflows.md)                  |
+| Configure `config.yaml` and `secrets.yaml`               | [configuration.md](docs/configuration.md)                  |
+| **Check tile availability for a project**                | [guides/tiles_availability.md](docs/guides/tiles_availability.md) |
+| **Compute TTC stats from a geoparquet query**            | [guides/stats_run.md](docs/guides/stats_run.md)            |
+| **Patch TTC results back to TerraMatch**                 | [guides/terramatch_patch.md](docs/guides/terramatch_patch.md) |
+| Manual cross-account `tof-output` bucket policy refresh  | [manual_wri_policy_update.md](docs/manual_wri_policy_update.md) |
+
+---
+
+## Infrastructure in one paragraph
+
+Lithops fans out each pipeline step to AWS Lambda across three regions
+(eu-central-1 for DEM+S1, us-west-2 for S2, us-east-1 for predict —
+each co-located with its data source). Terraform provisions the IAM
+role and per-region Lithops state buckets in the `land-research`
+account; Lithops itself owns ECR repos and Lambda functions via
+`runtime build` / `runtime deploy`. The `wri` account owns
+`s3://tof-output` (where ARD and predictions live); a manual cross-
+account bucket policy grants `land-research` Lambdas read/write access.
+The full bring-up is in [docs/setup.md](docs/setup.md); the ownership
+split is in [docs/system_overview.md §5](docs/system_overview.md).
+
+---
 
 ## Tests
 
-Minimal tests live in `tests/`. You can run them with your preferred test runner after setting up the local environment.
+```bash
+uv run pytest tests/unit/                                     # fast unit tests
+uv run pytest tests/parity/test_golden_parity.py -v -s        # inference parity
+```
 
+---
 
+## License
 
-## TODOs
-
-- [ ] Integrate the final inference step into this pipeline after ARD generation.
-- [ ] Set up default bucket write desitnation once we confirm the process works well for folks.
-- [ ] Add pre-submission file checks and overwrite flagto avoid reprocessing completed tiles.
-- [ ] Expand validation and data quality reporting.
+See [LICENSE](LICENSE).

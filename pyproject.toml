@@ -1,32 +1,84 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "gri-tile-pipeline"
 version = "0.1.0"
-description = "A package for interacting with the TerraMatch API, enabling researchers to pull project and polygon-specific data and update indicator values programmatically."
+description = "GRI TTC tile pipeline: ingest, download, predict, stats"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "arraylake",
-  "boto3",
-  "click",
-  "dask_image",
-  "dask<2025.3.0",
-  "distributed",
-  "duckdb",
-  "hickle",
-  "lithops",
-  "loguru",
-  "matplotlib",
-  "numexpr",
-  "obstore",
-  "odc-geo",
-  "odc-stac",
-  "psycopg2-binary",
-  "pyproj",
-  "pystac-client",
-  "pytest",
-  "pyyaml",
-  "rasterio",
-  "scikit-image",
-  "shapely",
-  "xarray",
+    "click>=8.0",
+    "pyyaml>=6.0",
+    "loguru>=0.7",
+    "pandas>=2.0",
+    "duckdb>=1.5.1",
+    "obstore>=0.3",
+    "lithops==3.6.1",
+    "requests>=2.28",
+]
+
+[project.optional-dependencies]
+loaders = [
+    "numpy>=1.26",
+    "pystac-client>=0.7",
+    "odc-stac>=0.3",
+    "boto3>=1.28",
+    "pyproj>=3.6",
+    "shapely>=2.0",
+    "planetary-computer>=1.0",
+    "requests>=2.28",
+    "hickle>=5.0",
+    "rasterio>=1.3",
+]
+predict = [
+    "tensorflow>=2.16",
+    "scipy>=1.11",
+    "scikit-image>=0.21",
+    "scikit-learn>=1.3",
+    "hickle>=5.0",
+    "rasterio>=1.3",
+    "bottleneck>=1.3",
+    "numpy>=1.26",
+]
+zonal = [
+    "exactextract>=0.2",
+    "rasterio>=1.3",
+    "shapely>=2.0",
+    "geopandas>=0.14",
+    "pyproj>=3.6",
+    "rasterstats>=0.19",
+    "fiona>=1.9",
+    "scipy>=1.11",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+all = [
+    "gri-tile-pipeline[loaders,predict,zonal,dev]",
+]
+
+[project.scripts]
+gri-ttc = "gri_tile_pipeline.cli:gri_ttc"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gri_tile_pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "slow: tests taking >10s (deselect with -m 'not slow')",
+    "parity: parity comparison against reference",
+    "integration: requires AWS/S3 access",
+    "tf: requires TensorFlow",
+]
+addopts = "-v --tb=short -ra"
+filterwarnings = ["ignore::DeprecationWarning:tensorflow.*"]
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.10.8",
 ]

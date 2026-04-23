@@ -1,0 +1,21 @@
+lithops:
+  backend: aws_lambda
+  storage: aws_s3
+  log_level: INFO
+
+aws:
+  region: us-east-1
+
+aws_lambda:
+  execution_role: ${EXECUTION_ROLE_ARN}
+  region: us-east-1
+  architecture: x86_64
+  namespace: ttc-dev
+  max_workers: 100
+  runtime_memory: 6144
+  # AWS Lambda hard cap is 900 s (15 min); Lithops reserves a ~5 s buffer.
+  runtime_timeout: 900
+
+aws_s3:
+  region: us-east-1
+  storage_bucket: ${STATE_BUCKET_USE1}
