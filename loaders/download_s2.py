@@ -32,6 +32,8 @@ from pystac_client import Client
 from odc.stac import load as stac_load, configure_rio
 from shapely.geometry import shape as shapely_shape
 
+from loaders.shared import make_bbox, obstore_put_hkl
+
 # ----------------------------
 # Configuration
 # ----------------------------
@@ -77,19 +79,6 @@ def _to_numpy(x) -> np.ndarray:
 def to_uint16(arr01: np.ndarray) -> np.ndarray:
     """Quantize float [0,1] → uint16 (0..65535)."""
     return np.clip(np.round(arr01 * 65535.0), 0, 65535).astype(np.uint16)
-
-def make_bbox(initial_bbx: list, expansion: int = 10) -> list:
-    """
-    Makes a (min_x, min_y, max_x, max_y) bounding box that
-    is 2 * expansion 300 x 300 meter ESA LULC pixels
-    """
-    multiplier = 1/360  # ~300m in decimal degrees
-    bbx = initial_bbx.copy()
-    bbx[0] -= expansion * multiplier
-    bbx[1] -= expansion * multiplier
-    bbx[2] += expansion * multiplier
-    bbx[3] += expansion * multiplier
-    return bbx
 
 def bbox2geojson(bbox: list) -> dict:
     """Convert a bounding box to a GeoJSON polygon."""
@@ -198,23 +187,6 @@ def _check_for_alt_img(local_clouds: np.ndarray, cloud_dates: np.ndarray,
 # ----------------------------
 # Storage utilities
 # ----------------------------
-def obstore_put_hkl(store: Union[S3Store, LocalStore], relpath: str, obj) -> None:
-    """Save object as hickle file to obstore."""
-    os.makedirs("/tmp", exist_ok=True)
-    tmp = tempfile.NamedTemporaryFile(suffix=".hkl", delete=False)
-    tmp.close()
-    try:
-        hkl.dump(obj, tmp.name, mode="w", compression="gzip")
-        with open(tmp.name, "rb") as f:
-            data = f.read()
-        obs.put(store, relpath, data)
-        logger.debug(f"Saved {relpath} ({len(data)/1024:.1f} KB)")
-    finally:
-        try:
-            os.remove(tmp.name)
-        except:
-            pass
-
 def ensure_dirs(store: Union[S3Store, LocalStore], *dirs: str) -> None:
     """Ensure directories exist in storage."""
     for d in dirs:

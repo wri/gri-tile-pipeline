@@ -25,6 +25,8 @@ from pystac_client import Client
 from odc.stac import stac_load, configure_rio
 import hickle as hkl
 
+from loaders.shared import make_bbox, obstore_put_hkl
+
 EARTH_SEARCH_V1 = "https://earth-search.aws.element84.com/v1"
 DEM_COLLECTION = "cop-dem-glo-30"  # Earth Search v1 Copernicus DEM 30m
 DEM_REGION = "eu-central-1"
@@ -37,24 +39,6 @@ def setup_logging(is_debug: bool) -> None:
     logger.add(sys.stderr, level="DEBUG" if is_debug else "INFO")
 
 
-def obstore_put_hkl(store, relpath: str, obj) -> None:
-    tmp = tempfile.NamedTemporaryFile(suffix=".hkl", delete=False)
-    tmp.close()
-    try:
-        hkl.dump(obj, tmp.name, mode="w", compression="gzip")
-        with open(tmp.name, "rb") as f:
-            try:
-                obs.put(store, relpath, f.read())
-            except Exception:
-                logger.exception(f"Failed to write object store key: {relpath}")
-                raise
-    finally:
-        try:
-            os.remove(tmp.name)
-        except Exception:
-            pass
-
-
 def get_aws_principal() -> str:
     return boto3.client("sts").get_caller_identity()["Arn"]
 
@@ -65,17 +49,6 @@ def ensure_local_dirs_for_key(store, relpath: str) -> None:
         dirname = os.path.dirname(relpath)
         if dirname:
             os.makedirs(os.path.join(store.prefix, dirname), exist_ok=True)
-
-
-# Legacy helpers
-def make_bbox(initial_bbx: list, expansion: int = 10) -> list:
-    multiplier = 1 / 360
-    bbx = initial_bbx.copy()
-    bbx[0] -= expansion * multiplier
-    bbx[1] -= expansion * multiplier
-    bbx[2] += expansion * multiplier
-    bbx[3] += expansion * multiplier
-    return bbx
 
 
 def bbox2geojson(bbox: list) -> dict:
@@ -245,94 +218,12 @@ def main():
 
     setup_logging(args.debug)
 
-    logger.info(
-        f"Starting DEM job year={args.year} tile={args.X_tile}X{args.Y_tile}Y dest={args.dest}"
-    )
-    if args.dest.startswith("s3://"):
-        store = from_url(args.dest, region = "us-east-1")
-    else:
-        os.makedirs(args.dest, exist_ok=True)
-        store = LocalStore(prefix=args.dest)
-
     try:
-        configure_rio(
-            cloud_defaults=True, aws={"requester_pays": True, "region_name": DEM_REGION}
-        )
-
-        # Log aws principal making the request (debug, and safe)
-        try:
-            logger.debug(f"AWS Principal: {get_aws_principal()}")
-        except Exception:
-            logger.warning("Could not retrieve AWS principal")
-
-        # TODO: Formalize the bbox logic across scripts.
-        initial_bbx = [args.lon, args.lat, args.lon, args.lat]
-        bbx = make_bbox(initial_bbx, expansion=args.expansion / 30)
-        logger.debug(f"BBX: {bbx}")
-        geo_bbx = bbox2geojson(bbx)
-
-        # Build object store keys RELATIVE to the store prefix to avoid duplicating `dest`
-        base_key = f"{args.year}/raw/{args.X_tile}/{args.Y_tile}/raw"
-        misc_key = f"{base_key}/misc"
-        fn_dem_key = f"{misc_key}/dem_{args.X_tile}X{args.Y_tile}Y.hkl"
-        ensure_local_dirs_for_key(store, fn_dem_key)
-
-        # Query STAC and load DEM from the response.
-        client = Client.open(EARTH_SEARCH_V1)
-        search = client.search(collections=[DEM_COLLECTION], bbox=bbx)
-        logger.debug(f"Search: {search.url_with_parameters()}")
-        items = search.item_collection()
-        logger.info(f"Found {len(items)} DEM items")
-        if len(items) == 0:
-            raise RuntimeError(f"No DEM items found for bbox={bbx}")
-
-        ds = stac_load(
-            items,
-            bands=["data"],  # DEM uses 'data' asset
-            geopolygon=geo_bbx,
-            #bbox=bbox_4326_to_3857(bbx),
-            #resolution=10,
-            resampling="bilinear",
-            chunks={},
-        )
-        logger.debug(f"DEM Dataset: {ds}")
-        for dim_name, size in ds.sizes.items():
-            logger.debug(f"- {dim_name}: {size}")
-        dem = (
-            ds["data"]
-            .isel(time=0)
-            .transpose("latitude", "longitude")
-            .values.astype("float32")
-        )
-        if not np.isfinite(dem).all():
-            raise ValueError("DEM contains non-finite values after load")
-        logger.debug(f"DEM stats: min={dem.min()}, max={dem.max()}, mean={dem.mean()}, std={dem.std()}")
-    
-        # bilinearly upsample from 30m to 10m resolution before slope calculation.
-        dem = zoom(dem, 3, order=1)
-
-        width = dem.shape[0]
-        height = dem.shape[1]
-        logger.debug(f"DEM shape: {dem.shape}")
-
-        dem = calcSlope(dem.reshape((1, width, height)),
-                              np.full((width, height), 10),
-                              np.full((width, height), 10),
-                              zScale=1,
-                              minSlope=0.02)
-        dem = dem.reshape((width, height, 1))
-
-        dem = dem[1:width - 1, 1:height - 1, :]
-        dem = dem.squeeze()
-        if not np.isfinite(dem).all():
-            raise ValueError("Slope DEM contains non-finite values")
-        logger.debug(f"Slope stats: min={dem.min()}, max={dem.max()}, mean={dem.mean()}, std={dem.std()}")
-
-        obstore_put_hkl(store, fn_dem_key, dem)
-        # Log full resolved path for clarity
-        full_path = f"{args.dest.rstrip('/')}/{fn_dem_key}"
-        logger.info(
-            f"Completed DEM slope generation shape={dem.shape} saved={full_path}"
+        _run_core(
+            year=args.year, lon=args.lon, lat=args.lat,
+            X_tile=args.X_tile, Y_tile=args.Y_tile,
+            dest=args.dest, expansion=args.expansion,
+            debug=args.debug,
         )
     except SystemExit:
         raise
@@ -341,7 +232,103 @@ def main():
         raise SystemExit(1)
 
 
-# --- programmatic entrypoint for Lithops ---
+# --- programmatic entrypoint for Lithops / local ---
+def _run_core(
+    year: int,
+    lon: float,
+    lat: float,
+    X_tile: int,
+    Y_tile: int,
+    dest: str,
+    expansion: int = 300,
+    debug: bool = False,
+) -> None:
+    """Core DEM download logic, called by both main() and run()."""
+    if debug:
+        setup_logging(True)
+
+    logger.info(
+        f"Starting DEM job year={year} tile={X_tile}X{Y_tile}Y dest={dest}"
+    )
+    if dest.startswith("s3://"):
+        store = from_url(dest, region="us-east-1")
+    else:
+        os.makedirs(dest, exist_ok=True)
+        store = LocalStore(prefix=dest)
+
+    configure_rio(
+        cloud_defaults=True, aws={"requester_pays": True, "region_name": DEM_REGION}
+    )
+
+    try:
+        logger.debug(f"AWS Principal: {get_aws_principal()}")
+    except Exception:
+        logger.warning("Could not retrieve AWS principal")
+
+    initial_bbx = [lon, lat, lon, lat]
+    bbx = make_bbox(initial_bbx, expansion=expansion / 30)
+    logger.debug(f"BBX: {bbx}")
+    geo_bbx = bbox2geojson(bbx)
+
+    base_key = f"{year}/raw/{X_tile}/{Y_tile}/raw"
+    misc_key = f"{base_key}/misc"
+    fn_dem_key = f"{misc_key}/dem_{X_tile}X{Y_tile}Y.hkl"
+    ensure_local_dirs_for_key(store, fn_dem_key)
+
+    client = Client.open(EARTH_SEARCH_V1)
+    search = client.search(collections=[DEM_COLLECTION], bbox=bbx)
+    logger.debug(f"Search: {search.url_with_parameters()}")
+    items = search.item_collection()
+    logger.info(f"Found {len(items)} DEM items")
+    if len(items) == 0:
+        raise RuntimeError(f"No DEM items found for bbox={bbx}")
+
+    ds = stac_load(
+        items,
+        bands=["data"],
+        geopolygon=geo_bbx,
+        resampling="bilinear",
+        chunks={},
+    )
+    logger.debug(f"DEM Dataset: {ds}")
+    for dim_name, size in ds.sizes.items():
+        logger.debug(f"- {dim_name}: {size}")
+    dem = (
+        ds["data"]
+        .isel(time=0)
+        .transpose("latitude", "longitude")
+        .values.astype("float32")
+    )
+    if not np.isfinite(dem).all():
+        raise ValueError("DEM contains non-finite values after load")
+    logger.debug(f"DEM stats: min={dem.min()}, max={dem.max()}, mean={dem.mean()}, std={dem.std()}")
+
+    dem = zoom(dem, 3, order=1)
+
+    width = dem.shape[0]
+    height = dem.shape[1]
+    logger.debug(f"DEM shape: {dem.shape}")
+
+    dem = calcSlope(dem.reshape((1, width, height)),
+                          np.full((width, height), 10),
+                          np.full((width, height), 10),
+                          zScale=1,
+                          minSlope=0.02)
+    dem = dem.reshape((width, height, 1))
+
+    dem = dem[1:width - 1, 1:height - 1, :]
+    dem = dem.squeeze()
+    if not np.isfinite(dem).all():
+        raise ValueError("Slope DEM contains non-finite values")
+    logger.debug(f"Slope stats: min={dem.min()}, max={dem.max()}, mean={dem.mean()}, std={dem.std()}")
+
+    obstore_put_hkl(store, fn_dem_key, dem)
+    full_path = f"{dest.rstrip('/')}/{fn_dem_key}"
+    logger.info(
+        f"Completed DEM slope generation shape={dem.shape} saved={full_path}"
+    )
+
+
 def run(
     year: int | str,
     lon: float,
@@ -352,34 +339,12 @@ def run(
     expansion: int = 300,
     debug: bool = False,
 ) -> dict:
-    """
-    Programmatic wrapper around the CLI for serverless execution.
-    Builds argv and calls main() so we don't duplicate logic.
-    Returns a small dict for logging/QA.
-    """
-    import sys
-
-    argv = [
-        __file__,
-        "--year", str(year),
-        "--lon", str(lon),
-        "--lat", str(lat),
-        "--X_tile", str(X_tile),
-        "--Y_tile", str(Y_tile),
-        "--dest", dest,
-        "--expansion", str(expansion),
-    ]
-    if debug:
-        # only appended if your parser supports --debug
-        argv.append("--debug")
-
-    old_argv = sys.argv
-    try:
-        sys.argv = argv
-        main()
-    finally:
-        sys.argv = old_argv
-
+    """Programmatic entry-point for Lithops and local execution."""
+    _run_core(
+        year=int(year), lon=float(lon), lat=float(lat),
+        X_tile=int(X_tile), Y_tile=int(Y_tile),
+        dest=dest, expansion=expansion, debug=debug,
+    )
     return {
         "product": "dem",
         "year": int(year),
