@@ -88,7 +88,7 @@ these. Override individual keys if you need a custom path.
 | `tile_region`             | str   | `us-east-1`             | AWS region for `tile_bucket`                           |
 | `small_sites_area_thresh` | float | `0.5`                   | Hectares cutoff for small-site handling                |
 | `lulc_raster_path`        | str   | ""                      | LULC raster URI for error propagation (optional)       |
-| `shift_error_enabled`     | bool  | `false`                 | Enable 8-direction shift-error metric                  |
+| `shift_error_enabled`     | bool  | `true`                  | Enable 8-direction shift-error metric (on by default)  |
 | `lookup_parquet`          | str   | `data/tiledb.parquet`   | Tile grid lookup                                       |
 | `lookup_csv`              | str   | ""                      | CSV fallback when parquet unavailable                  |
 
