@@ -59,7 +59,7 @@ class ZonalConfig:
     tile_region: str = "us-east-1"
     small_sites_area_thresh: float = 0.5
     lulc_raster_path: str = ""
-    shift_error_enabled: bool = False
+    shift_error_enabled: bool = True
     lookup_parquet: str = "data/tiledb.parquet"
     lookup_csv: str = ""
 

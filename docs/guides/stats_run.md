@@ -55,10 +55,10 @@ accept the same filter flags as
 | `--dry-run`              | Print the plan + cost, no side effects.                          |
 | `--check-only`           | Stop after the availability check; write missing-tiles CSV.      |
 | `--missing-only`         | Skip polygons that already have a TTC value for their year.      |
-| `--year N`               | Override the plantstart-derived prediction year.                 |
+| `--year N`               | Override the plantstart-derived prediction year. When set, the auto-generated output filename gets a `_<year>` suffix (e.g. `TEST_01_GRI_stats_2025.csv`) so it does not collide with the plantstart-relative run (`TEST_01_GRI_stats.csv`). |
 | `--skip-existing`        | (default on) Skip tiles already at `--dest`.                     |
 | `--lulc-raster s3://…`   | Enable LULC-based error propagation.                             |
-| `--shift-error`          | Enable the 8-direction shift-error metric.                       |
+| `--shift-error` / `--no-shift-error` | 8-direction shift-error metric. **On by default**; pass `--no-shift-error` to disable. |
 | `--tm-patch` + `--tm-patch-project-id <id>` | After stats, patch results back to TerraMatch (dry-run by default; add `--tm-patch-apply`). |
 
 ---
@@ -85,7 +85,7 @@ Relevant `stats` flags:
 | ------------------------ | ------------------------------------------------------------------ |
 | `--include-cols a,b,c`   | Forward additional polygon columns into `results.csv`.             |
 | `--lulc-raster s3://…`   | Override `zonal.lulc_raster_path`.                                 |
-| `--shift-error`          | Override `zonal.shift_error_enabled` on.                           |
+| `--shift-error` / `--no-shift-error` | 8-direction shift-error metric. **On by default** (`zonal.shift_error_enabled: true`); pass `--no-shift-error` to disable. |
 | `--lookup-parquet PATH`  | Override `zonal.lookup_parquet`.                                   |
 
 ---
@@ -103,7 +103,7 @@ One row per polygon. Typical columns:
 | `pred_year`             | int    | Year of the prediction used.                         |
 | `ttc`                   | float  | Mean tree cover (0-100) over the polygon.            |
 | `area_HA`               | float  | Polygon area in hectares.                            |
-| `ttc_shift_error`       | float  | Present when `--shift-error` is on.                  |
+| `ttc_shift_error`       | float  | Present by default; absent if `--no-shift-error`.    |
 | `ttc_lulc_error`        | float  | Present when `--lulc-raster` is set.                 |
 
 Additional columns land if you passed `--include-cols`.
@@ -135,4 +135,4 @@ Full guide: [terramatch_patch.md](terramatch_patch.md).
 | `No tiles resolved from input` | Filter matches zero polygons | Sanity-check with `gri-ttc report --skip-s3` using the same filter |
 | `No prediction tiles intersect the polygons` in stats | Year mismatch or missing predictions | Re-run `check` to confirm availability; try a different `--year` |
 | `results.csv` missing some polygons | They were dropped during stats | `gri-ttc audit-drops --request request.csv --stats results.csv` classifies the cause |
-| `ttc_shift_error` column absent | `--shift-error` not on and not set in config | Add `--shift-error` or set `zonal.shift_error_enabled: true` in `config.yaml` |
+| `ttc_shift_error` column absent | `--no-shift-error` was passed, or `zonal.shift_error_enabled: false` in `config.yaml` | Drop `--no-shift-error` and remove/flip the config override — it is on by default |

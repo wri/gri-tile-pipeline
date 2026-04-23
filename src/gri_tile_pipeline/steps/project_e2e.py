@@ -500,10 +500,11 @@ def run_project_pipeline(
         gdf, geojson_path, meta = _extract_project(short_name, geoparquet, year_override=year)
 
     label = meta["label"]
+    year_suffix = f"_{year}" if year is not None else ""
     if check_only:
-        output = output or f"temp/{label}_missing_tiles.csv"
+        output = output or f"temp/{label}_missing_tiles{year_suffix}.csv"
     else:
-        output = output or f"temp/{label}_stats.csv"
+        output = output or f"temp/{label}_stats{year_suffix}.csv"
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
 
     year_counts = meta["year_counts"]

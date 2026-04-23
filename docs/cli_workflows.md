@@ -288,12 +288,12 @@ If the file has a `plantstart` column you can swap `--year 2023` for
 | ------------------------ | ---------------------------------------------------------- |
 | `--check-only`           | Stop after step 4 (write missing tiles CSV, exit)          |
 | `--missing-only`         | Process only polygons missing TTC for their plantstart year |
-| `--year N`               | Override plantstart-derived prediction year                |
+| `--year N`               | Override plantstart-derived prediction year. When set, the auto-generated output filename gets a `_<year>` suffix (e.g. `{label}_stats_2025.csv`) so it does not overwrite the plantstart-relative run (`{label}_stats.csv`). |
 | `--local`                | Run download+predict in-process (default: Lambda)          |
 | `--max-workers N`        | Parallelism for `--local` mode (ignored on Lambda)         |
 | `--skip-existing`        | (default) Skip tiles already on `--dest`                   |
 | `--lulc-raster s3://…`   | Enable LULC-based error propagation                        |
-| `--shift-error`          | Enable shift-error calculation                             |
+| `--shift-error` / `--no-shift-error` | Shift-error calculation. **On by default**; pass `--no-shift-error` to disable. |
 | `--dry-run`              | Print plan; no side effects                                |
 
 **Output (`results.csv`)**
