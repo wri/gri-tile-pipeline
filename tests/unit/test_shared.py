@@ -9,7 +9,7 @@ import pytest
 # Add loaders to path so we can import shared directly
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "loaders"))
 
-from shared import compute_band_stats, make_bbox
+from loaders.shared import compute_band_stats, make_bbox
 
 
 class TestMakeBbox:

@@ -90,7 +90,7 @@ def load_reference_tif(tile_name: str) -> np.ndarray:
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
 def test_golden_diagnostics(tile_name):
     """Run diagnostic analysis on a golden tile: cloud removal on vs off."""
-    from predict_tile import predict_tile_from_arrays
+    from loaders.predict_tile import predict_tile_from_arrays
 
     tile_diag_dir = DIAG_DIR / tile_name
     os.makedirs(tile_diag_dir, exist_ok=True)

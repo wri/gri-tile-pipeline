@@ -101,7 +101,7 @@ _stats_cache: dict[str, dict] = {}
 def _get_prediction(tile_name: str) -> np.ndarray:
     """Get (or compute and cache) prediction for a golden tile."""
     if tile_name not in _prediction_cache:
-        from predict_tile import predict_tile_from_arrays
+        from loaders.predict_tile import predict_tile_from_arrays
 
         print(f"\n  Computing prediction for {tile_name}...")
         arrays = load_golden_tile(tile_name)
