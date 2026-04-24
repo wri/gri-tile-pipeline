@@ -9,6 +9,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     defaults:
       run:
         shell: bash -l {0}
@@ -37,6 +38,9 @@ jobs:
 
      # Step 5: Run tests
      - name: Run Tests
-       env:
-        GFW_ACCESS_TOKEN: ${{ secrets.GFW_ACCESS_TOKEN }}
-       run: uv run pytest tests/
+       run: |
+        if [ -f "secrets.yaml" ]; then
+          echo "Aborting tests to avoid unintended execution.."
+          exit 1
+        fi
+        uv run pytest tests/
