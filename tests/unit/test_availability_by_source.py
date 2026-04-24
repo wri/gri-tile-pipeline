@@ -55,4 +55,4 @@ def test_check_availability_by_source_empty_tiles():
     from gri_tile_pipeline.tiles.availability import check_availability_by_source
 
     result = check_availability_by_source(tiles=[], dest="s3://nope")
-    assert result == {} or result is None
+    assert result == {}

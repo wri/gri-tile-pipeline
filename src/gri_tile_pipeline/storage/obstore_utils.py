@@ -20,9 +20,12 @@ def make_s3_store(bucket: str, region: str, profile: str | None = None):
     from obstore.auth.boto3 import Boto3CredentialProvider
     from obstore.store import S3Store
 
-    session = boto3.Session(profile_name=profile)
-    credential_provider = Boto3CredentialProvider(session)
-    return S3Store(bucket, region=region, credential_provider=credential_provider)
+    if profile is not None:
+        session = boto3.Session(profile_name=profile)
+        credential_provider = Boto3CredentialProvider(session)
+        return S3Store(bucket, region=region, credential_provider=credential_provider)
+    else:
+        return None
 
 
 def from_dest(dest: str, *, region: str = "us-east-1", profile: str | None = None):
