@@ -447,8 +447,8 @@ def _build_report(
 ) -> dict:
     """Write the HTML report; return the metrics dict."""
     # Reuse the battle-tested visuals from generate_report.py.
-    from parity.generate_report import HTML_TEMPLATE, make_tile_section
-    from parity.metrics import compare_predictions
+    from tests.parity.generate_report import HTML_TEMPLATE, make_tile_section
+    from tests.parity.metrics import compare_predictions
 
     # Align dims defensively — downloads sometimes differ by a row/col at edges.
     h = min(new_pred.shape[0], existing_pred.shape[0])

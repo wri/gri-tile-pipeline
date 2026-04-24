@@ -13,6 +13,7 @@ Requires:
 import os
 import sys
 import numpy as np
+import pytest
 
 # Paths
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -76,7 +77,7 @@ def test_predict_parity():
 
     # Run our prediction
     sys.path.insert(0, os.path.join(REPO_ROOT, "loaders"))
-    from predict_tile import run_local
+    from loaders.predict_tile import run_local
 
     os.makedirs(os.path.dirname(OUTPUT_TIF), exist_ok=True)
     ours = run_local(
@@ -120,6 +121,7 @@ def test_predict_parity():
     return stats
 
 
+@pytest.mark.skip(reason="Skipping since the example data files are currently not available.")
 def test_preprocessing_only():
     """Test just the preprocessing pipeline (no TF needed).
 

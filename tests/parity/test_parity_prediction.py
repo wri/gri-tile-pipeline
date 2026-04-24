@@ -31,7 +31,7 @@ def test_prediction_parity_baseline():
     if loader_path not in sys.path:
         sys.path.insert(0, loader_path)
     # Force reimport in case of caching
-    import predict_tile
+    from loaders import predict_tile
     importlib.reload(predict_tile)
     run_local = predict_tile.run_local
 
