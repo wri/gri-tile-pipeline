@@ -128,10 +128,10 @@ identify tiles → check S3) and exits. Supports `--year` for overrides.
 
 ```bash
 # Plantstart-derived year (default)
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --check-only --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --check-only --yes
 
 # Force a specific prediction year
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --year 2025 --check-only --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --year 2025 --check-only --yes
 ```
 
 Writes a missing-tiles CSV to `temp/<label>_missing_tiles.csv` (override
@@ -143,7 +143,7 @@ stdout.
 ```bash
 gri-ttc check polygons.geojson \
     --year 2023 \
-    --dest s3://tof-output \
+    --dest s3://wri-restoration-geodata-ttc \
     --check-type predictions \
     -o missing.csv
 ```
@@ -165,7 +165,7 @@ Lambda. Safe to re-run; `--skip-existing` avoids redoing work.
 
 ```bash
 gri-ttc run missing.csv \
-    --dest s3://tof-output \
+    --dest s3://wri-restoration-geodata-ttc \
     --steps download,predict \
     --skip-existing \
     --yes
@@ -174,15 +174,15 @@ gri-ttc run missing.csv \
 **Preview before spending**
 
 ```bash
-gri-ttc run missing.csv --dest s3://tof-output --dry-run
+gri-ttc run missing.csv --dest s3://wri-restoration-geodata-ttc --dry-run
 # Prints tile count, region breakdown, estimated Lambda cost
 ```
 
 Standalone commands exist if you want to run just one stage:
 
 ```bash
-gri-ttc download missing.csv --dest s3://tof-output --yes
-gri-ttc predict missing.csv --dest s3://tof-output --yes
+gri-ttc download missing.csv --dest s3://wri-restoration-geodata-ttc --yes
+gri-ttc predict missing.csv --dest s3://wri-restoration-geodata-ttc --yes
 ```
 
 **Local dev-box mode** — useful when debugging:
@@ -226,31 +226,31 @@ predict step fails loud with a pointer to `make render`.
 
 ```bash
 # Classic: a short name as positional arg
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes
 
 # Stop after the 4 availability steps (no download/predict)
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --check-only --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --check-only --yes
 
 # Force a specific prediction year
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --year 2025 --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --year 2025 --yes
 
 # Multiple short names via flag
 gri-ttc run-project \
     --short-name GHA_22_INEC --short-name RWA_23_AEE \
-    --dest s3://tof-output --yes
+    --dest s3://wri-restoration-geodata-ttc --yes
 
 # Carve by cohort
-gri-ttc run-project --cohort priority --dest s3://tof-output --yes
+gri-ttc run-project --cohort priority --dest s3://wri-restoration-geodata-ttc --yes
 
 # Specific polygons
 gri-ttc run-project \
     --poly-uuid abc-123 --poly-uuid def-456 \
-    --year 2023 --dest s3://tof-output --yes
+    --year 2023 --dest s3://wri-restoration-geodata-ttc --yes
 
 # Arbitrary SQL
 gri-ttc run-project \
     --where "framework_key='terrafund-landscapes' AND YEAR(plantstart)=2023" \
-    --dest s3://tof-output --yes
+    --dest s3://wri-restoration-geodata-ttc --yes
 ```
 
 ### Route 2 — arbitrary polygon file
@@ -264,7 +264,7 @@ Lambda by default with a `--local` opt-in matching `run-project`:
 # End-to-end (download + predict + stats) in Lambda mode
 gri-ttc resolve my_polys.geojson --year 2023 -o tiles.csv
 gri-ttc run tiles.csv \
-    --dest s3://tof-output \
+    --dest s3://wri-restoration-geodata-ttc \
     --steps download,predict,stats \
     --polygons my_polys.geojson \
     --year 2023 \
@@ -274,7 +274,7 @@ gri-ttc run tiles.csv \
 # Just check tile availability (no compute) — mirrors run-project --check-only
 gri-ttc check my_polys.geojson \
     --year 2023 \
-    --dest s3://tof-output \
+    --dest s3://wri-restoration-geodata-ttc \
     --check-type predictions \
     -o missing.csv
 ```
@@ -334,7 +334,7 @@ gri-ttc tm-patch --results results.csv \
 Inline from `run-project`:
 
 ```bash
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes \
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes \
     --tm-patch --tm-patch-project-id <TM_PROJECT_ID> \
     --tm-patch-env staging --tm-patch-apply
 ```
@@ -355,7 +355,7 @@ Every fan-out step archives a `JobTracker` under `runs/<run_id>/`:
 gri-ttc runs list                # all past runs
 gri-ttc runs show <run_id>       # summary + breakdown
 gri-ttc runs failed <run_id> -o retry.csv
-gri-ttc run retry.csv --dest s3://tof-output --steps predict --yes
+gri-ttc run retry.csv --dest s3://wri-restoration-geodata-ttc --steps predict --yes
 ```
 
 See [`system_overview.md §6`](system_overview.md) for the tracker schema and
@@ -367,14 +367,14 @@ the `runs/<run_id>/` layout.
 
 | I want to…                                                  | Command                                                     |
 | ----------------------------------------------------------- | ----------------------------------------------------------- |
-| Run everything end-to-end for a project                     | `gri-ttc run-project X --dest s3://tof-output --yes`        |
+| Run everything end-to-end for a project                     | `gri-ttc run-project X --dest s3://wri-restoration-geodata-ttc --yes`        |
 | Run everything for an arbitrary polygon file                | `gri-ttc resolve f.geojson --year Y -o tiles.csv` → `gri-ttc run tiles.csv --steps download,predict,stats --polygons f.geojson --year Y --yes` |
-| Availability check for a project (no compute)               | `gri-ttc run-project X --dest s3://tof-output --check-only --yes` |
-| Availability check for an arbitrary polygon file            | `gri-ttc check f.geojson --year Y --dest s3://tof-output -o missing.csv` |
+| Availability check for a project (no compute)               | `gri-ttc run-project X --dest s3://wri-restoration-geodata-ttc --check-only --yes` |
+| Availability check for an arbitrary polygon file            | `gri-ttc check f.geojson --year Y --dest s3://wri-restoration-geodata-ttc -o missing.csv` |
 | 4-phase Markdown availability report for a project          | `gri-ttc report --short-name X`                             |
-| Run everything for a custom SQL filter                      | `gri-ttc run-project --where "..." --dest s3://tof-output`  |
+| Run everything for a custom SQL filter                      | `gri-ttc run-project --where "..." --dest s3://wri-restoration-geodata-ttc`  |
 | Fill just the prediction tiles                              | `gri-ttc run missing.csv --steps download,predict`          |
-| Compute stats from polygons against existing prediction tiles | `gri-ttc stats polys.geojson --dest s3://tof-output --year Y` |
+| Compute stats from polygons against existing prediction tiles | `gri-ttc stats polys.geojson --dest s3://wri-restoration-geodata-ttc --year Y` |
 | Dry-run cost estimate for a tile list                       | `gri-ttc cost tiles.csv --include-predict`                  |
 | Retry failed tiles from a past run                          | `gri-ttc runs failed <id> -o retry.csv` then `gri-ttc run retry.csv ...` |
 | Quickly sanity-check the Lambda is live                     | `uv run python scripts/predict_lambda_smoke.py`             |
