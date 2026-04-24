@@ -53,6 +53,22 @@ data "aws_iam_policy_document" "inline" {
     ]
   }
 
+  # External public/requester-pays buckets the loaders read from.
+  # - copernicus-dem-30m: Copernicus DEM GLO-30 via Earth Search (DEM loader).
+  # - sentinel-cogs: Sentinel-2 L2A COGs via Earth Search (S2 loader).
+  # Add entries here when a new external dataset is introduced.
+  statement {
+    sid     = "ExternalPublicDataRead"
+    effect  = "Allow"
+    actions = ["s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation"]
+    resources = [
+      "arn:aws:s3:::copernicus-dem-30m",
+      "arn:aws:s3:::copernicus-dem-30m/*",
+      "arn:aws:s3:::sentinel-cogs",
+      "arn:aws:s3:::sentinel-cogs/*",
+    ]
+  }
+
   # Lithops pulls images from ECR in the same account. Lithops itself creates
   # the repos via `lithops runtime build`; the execution role only needs pull.
   statement {
