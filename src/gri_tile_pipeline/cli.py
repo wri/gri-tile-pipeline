@@ -125,19 +125,15 @@ def gri_ttc(ctx: click.Context, config_path, log_level, log_format, verbose, qui
 def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_polygons,
             project_ids, short_names_opt, framework_keys, poly_uuids, cohorts, where_sql):
     """Resolve any supported input to a canonical tiles CSV.
-
     INPUT can be:
-
     \b
       - Tiles CSV (Year, X, Y, X_tile, Y_tile)   -> passthrough
       - Request CSV (project_id, plantstart_year) -> query geoparquet
       - Polygon file (GeoJSON, GPKG, etc.)        -> spatial join, needs --year
       - JSON request (legacy inbound format)      -> DuckDB tile lookup
       - Short name (e.g. GHA_22_INEC)             -> query geoparquet
-
     INPUT may be omitted when any filter flag is provided:
     --where / --poly-uuid / --cohort / --project-id / --short-name / --framework-key.
-
     \b
     Examples:
         gri-ttc resolve GHA_22_INEC -o tiles.csv
@@ -147,23 +143,137 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
         gri-ttc resolve --where "short_name='GHA_22_INEC'" -o tiles.csv
     """
     from gri_tile_pipeline.cli_context import emit_json, get as get_ctx
-    from gri_tile_pipeline.steps.resolve_input import resolve_to_tiles
-    from gri_tile_pipeline.tiles.csv_io import write_tiles_csv
 
     gri = get_ctx(ctx)
     cfg = gri.cfg
+
+    try:
+        result = resolve_function(
+            cfg=cfg,
+            input=input,
+            output=output,
+            year=year,
+            year_from_plantstart=year_from_plantstart,
+            geoparquet=geoparquet,
+            save_polygons=save_polygons,
+            project_ids=project_ids,
+            short_names_opt=short_names_opt,
+            framework_keys=framework_keys,
+            poly_uuids=poly_uuids,
+            cohorts=cohorts,
+            where_sql=where_sql,
+        )
+    except ValueError as e:
+        raise click.UsageError(str(e))
+
+    if result["status"] == "no_work":
+        emit_json(ctx, {
+            "command": "resolve",
+            "status": "no_work",
+            "input": result["input"],
+            "input_type": result["input_type"],
+            "n_tiles": 0,
+        })
+        ctx.exit(ExitCode.NO_WORK)
+        return
+
+    emit_json(ctx, {
+        "command": "resolve",
+        "status": "ok",
+        "input": result["input"],
+        "input_type": result["input_type"],
+        "n_tiles": result["n_tiles"],
+        "output": result["output"],
+        "polygons_saved_to": result["polygons_saved_to"],
+        "metadata": result["metadata"],
+    })
+
+
+def resolve_function(
+    cfg,
+    input=None,
+    output="tiles.csv",
+    year=None,
+    year_from_plantstart=False,
+    geoparquet=None,
+    save_polygons=None,
+    project_ids=(),
+    short_names_opt=(),
+    framework_keys=(),
+    poly_uuids=(),
+    cohorts=(),
+    where_sql=None,
+):
+    """Resolve any supported input to a canonical tiles CSV.
+
+    Mirrors the arguments of the ``resolve`` CLI command so it can be
+    invoked programmatically (e.g. from tests) without going through Click.
+
+    Parameters
+    ----------
+    cfg : object
+        Pipeline config object (same object stored at
+        ``get_ctx(ctx).cfg``).
+    input : str | None
+        Path to tiles CSV / request CSV / polygon file / JSON, or a
+        short_name. Mutually exclusive with the filter arguments.
+    output : str | os.PathLike, default "tiles.csv"
+        Path where the resolved tiles CSV will be written.
+    year : int | None
+        Prediction year. Required for polygon input unless
+        ``year_from_plantstart`` is True.
+    year_from_plantstart : bool, default False
+        Derive prediction year from the polygon's ``plantstart`` column.
+    geoparquet : str | None
+        TerraMatch geoparquet path (for short_name / request CSV / filter).
+    save_polygons : str | None
+        If set, write resolved polygons to this path as GeoJSON.
+    project_ids, short_names_opt, framework_keys, poly_uuids, cohorts :
+        Iterables of filter values. Empty iterables mean "no filter on
+        this field". Mutually exclusive with ``input``.
+    where_sql : str | None
+        Raw SQL WHERE expression against ``tm.geoparquet``. Mutually
+        exclusive with ``input``.
+
+    Returns
+    -------
+    dict
+        {
+            "status": "ok" | "no_work",
+            "input": str | None,
+            "input_type": str,
+            "n_tiles": int,
+            "output": str | None,         # echoed back; None on no_work
+            "polygons_saved_to": str | None,
+            "metadata": dict | None,      # None on no_work
+        }
+
+    Raises
+    ------
+    ValueError
+        If both ``input`` and filter arguments are provided, or if neither
+        is provided.
+    """
+    from gri_tile_pipeline.steps.resolve_input import resolve_to_tiles
+    from gri_tile_pipeline.tiles.csv_io import write_tiles_csv
+
+    project_ids = list(project_ids) if project_ids else []
+    short_names_opt = list(short_names_opt) if short_names_opt else []
+    framework_keys = list(framework_keys) if framework_keys else []
+    poly_uuids = list(poly_uuids) if poly_uuids else []
+    cohorts = list(cohorts) if cohorts else []
 
     has_filter = bool(
         where_sql or poly_uuids or cohorts
         or project_ids or short_names_opt or framework_keys
     )
     if not input and not has_filter:
-        raise click.UsageError(
+        raise ValueError(
             "Provide INPUT or at least one filter "
             "(--where / --poly-uuid / --cohort / --project-id / --short-name / --framework-key)."
         )
     if input and has_filter:
-        raise click.UsageError("Provide INPUT or filter flags, not both.")
+        raise ValueError("Provide INPUT or filter flags, not both.")
 
     resolved = resolve_to_tiles(
         input, cfg,
@@ -171,22 +281,25 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
         year_from_plantstart=year_from_plantstart,
         geoparquet=geoparquet,
         where_sql=where_sql,
-        poly_uuids=list(poly_uuids) or None,
-        cohorts=list(cohorts) or None,
-        project_ids=list(project_ids) or None,
-        short_names=list(short_names_opt) or None,
-        framework_keys=list(framework_keys) or None,
+        poly_uuids=poly_uuids or None,
+        cohorts=cohorts or None,
+        project_ids=project_ids or None,
+        short_names=short_names_opt or None,
+        framework_keys=framework_keys or None,
     )
 
     source_desc = input or "filter"
     if not resolved.tiles:
         logger.warning(f"No tiles resolved from {source_desc}")
-        emit_json(ctx, {
-            "command": "resolve", "status": "no_work", "input": input,
-            "input_type": resolved.input_type, "n_tiles": 0,
-        })
-        ctx.exit(ExitCode.NO_WORK)
-        return
+        return {
+            "status": "no_work",
+            "input": input,
+            "input_type": resolved.input_type,
+            "n_tiles": 0,
+            "output": None,
+            "polygons_saved_to": None,
+            "metadata": None,
+        }
 
     write_tiles_csv(output, resolved.tiles)
     logger.info(f"Wrote {len(resolved.tiles)} tiles to {output} ({resolved.input_type})")
@@ -195,8 +308,7 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
         resolved.polygons_gdf.to_file(save_polygons, driver="GeoJSON")
         logger.info(f"Polygons saved to {save_polygons}")
 
-    emit_json(ctx, {
-        "command": "resolve",
+    return {
         "status": "ok",
         "input": input,
         "input_type": resolved.input_type,
@@ -204,8 +316,7 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
         "output": output,
         "polygons_saved_to": save_polygons,
         "metadata": resolved.metadata,
-    })
-
+    }
 
 # ---------------------------------------------------------------------------
 # tiles (group): missing / split / validate
@@ -228,7 +339,6 @@ def tiles():
 @click.pass_context
 def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output):
     """Find tiles for polygons missing TTC values.
-
     \b
     Examples:
         gri-ttc tiles missing                              # summary of what's missing
@@ -236,14 +346,20 @@ def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output):
         gri-ttc tiles missing --framework-key hbf -o hbf_missing.csv
     """
     from gri_tile_pipeline.cli_context import emit_json, get as get_ctx
-    from gri_tile_pipeline.tiles.csv_io import write_tiles_csv
-    from gri_tile_pipeline.tiles.missing import generate_missing_tiles, summarize_missing
 
     gri = get_ctx(ctx)
-    tiledb = tiledb or gri.cfg.parquet_path
 
-    if output is None and short_name is None and framework_key is None:
-        summary = summarize_missing(geoparquet)
+    result = tiles_missing_function(
+        cfg=gri.cfg,
+        geoparquet=geoparquet,
+        tiledb=tiledb,
+        short_name=short_name,
+        framework_key=framework_key,
+        output=output,
+    )
+
+    if result["status"] == "summary":
+        summary = result["summary"]
         if not gri.json_mode:
             click.echo(f"Total polygons missing TTC: {summary['total_missing']:,}\n")
             click.echo("By cohort:")
@@ -253,15 +369,86 @@ def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output):
         emit_json(ctx, {"command": "tiles.missing", "status": "summary", **summary})
         return
 
+    if result["status"] == "no_work":
+        emit_json(ctx, {"command": "tiles.missing", "status": "no_work", "n_tiles": 0})
+        ctx.exit(ExitCode.NO_WORK)
+        return
+
+    emit_json(ctx, {
+        "command": "tiles.missing", "status": "ok",
+        "n_tiles": result["n_tiles"], "output": result["output"],
+        "by_year": result["by_year"],
+    })
+
+
+def tiles_missing_function(
+    cfg,
+    geoparquet="temp/tm.geoparquet",
+    tiledb=None,
+    short_name=None,
+    framework_key=None,
+    output=None,
+):
+    """Find tiles for polygons missing TTC values.
+
+    Mirrors the arguments of the ``tiles missing`` CLI command so it can be
+    invoked programmatically (e.g. from tests) without going through Click.
+
+    Parameters
+    ----------
+    cfg : object
+        Pipeline config object (same object stored at
+        ``get_ctx(ctx).cfg``). Must expose ``cfg.parquet_path``.
+    geoparquet : str, default "temp/tm.geoparquet"
+        Path to TerraMatch geoparquet.
+    tiledb : str | None
+        Path to tiledb.parquet. Falls back to ``cfg.parquet_path`` when
+        ``None``.
+    short_name : str | None
+        Filter by project short_name.
+    framework_key : str | None
+        Filter by cohort framework_key.
+    output : str | os.PathLike | None
+        Output tiles CSV path. When ``output``, ``short_name``, and
+        ``framework_key`` are all ``None``, summary mode is used and no
+        tiles are generated or written.
+
+    Returns
+    -------
+    dict
+        Summary path (no filter or output requested)::
+
+            {"status": "summary", "summary": <summarize_missing() dict>}
+
+        No-work path (filter matched zero tiles)::
+
+            {"status": "no_work", "n_tiles": 0}
+
+        Ok path::
+
+            {
+                "status": "ok",
+                "n_tiles": int,
+                "output": str | None,
+                "by_year": dict[int, int],
+            }
+    """
+    from gri_tile_pipeline.tiles.csv_io import write_tiles_csv
+    from gri_tile_pipeline.tiles.missing import generate_missing_tiles, summarize_missing
+
+    tiledb = tiledb or cfg.parquet_path
+
+    if output is None and short_name is None and framework_key is None:
+        summary = summarize_missing(geoparquet)
+        return {"status": "summary", "summary": summary}
+
     tiles_list = generate_missing_tiles(
         geoparquet, tiledb, short_name=short_name, framework_key=framework_key,
     )
 
     if not tiles_list:
         logger.warning("No missing-TTC tiles matched the filter.")
-        emit_json(ctx, {"command": "tiles.missing", "status": "no_work", "n_tiles": 0})
-        ctx.exit(ExitCode.NO_WORK)
-        return
+        return {"status": "no_work", "n_tiles": 0}
 
     if output:
         write_tiles_csv(output, tiles_list)
@@ -270,11 +457,13 @@ def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output):
     year_counts: dict[int, int] = {}
     for t in tiles_list:
         year_counts[t["year"]] = year_counts.get(t["year"], 0) + 1
-    emit_json(ctx, {
-        "command": "tiles.missing", "status": "ok",
-        "n_tiles": len(tiles_list), "output": output,
+
+    return {
+        "status": "ok",
+        "n_tiles": len(tiles_list),
+        "output": output,
         "by_year": year_counts,
-    })
+    }
 
 
 @tiles.command("split")
@@ -1113,7 +1302,6 @@ def stats(ctx, polygons, dest, year, output, lookup_parquet, lookup_csv, include
 # ---------------------------------------------------------------------------
 # cost
 # ---------------------------------------------------------------------------
-
 @gri_ttc.command()
 @click.argument("tiles_csv", type=click.Path(exists=True))
 @click.option("--mem", type=int, default=None, help="Lambda memory in MB.")
@@ -1121,28 +1309,90 @@ def stats(ctx, polygons, dest, year, output, lookup_parquet, lookup_csv, include
 @click.pass_context
 def cost(ctx, tiles_csv, mem, include_predict):
     """Estimate Lambda costs without executing."""
-    from gri_tile_pipeline.steps.download_ard import estimate_cost, AVG_DURATIONS, PRICE_PER_GB_SEC
+    from gri_tile_pipeline.steps.download_ard import AVG_DURATIONS
+    from gri_tile_pipeline.steps.predict import AVG_PREDICT_DURATION
+
+    result = cost_function(
+        cfg=ctx.obj["cfg"],
+        tiles_csv=tiles_csv,
+        mem=mem,
+        include_predict=include_predict,
+    )
+
+    click.echo(f"Tiles: {result['n_tiles']}, Memory: {result['memory_mb']} MB")
+    for task_type, avg_sec in AVG_DURATIONS.items():
+        click.echo(
+            f"  {task_type:6s} ${result['costs'][task_type]:.2f}  "
+            f"(avg {avg_sec}s x {result['n_tiles']} jobs)"
+        )
+    click.echo(f"  Total: ${result['costs']['total']:.2f}")
+
+    if include_predict:
+        click.echo(
+            f"\nPrediction ({result['predict_memory_mb']} MB, "
+            f"~{AVG_PREDICT_DURATION}s avg):"
+        )
+        click.echo(f"  Predict: ${result['predict_cost']:.2f}")
+        click.echo(f"  Grand total: ${result['grand_total']:.2f}")
+
+
+def cost_function(cfg, tiles_csv, mem=None, include_predict=False):
+    """Estimate Lambda costs for a tile pipeline run.
+
+    Mirrors the arguments of the ``cost`` CLI command so it can be invoked
+    programmatically (e.g. from tests) without going through Click.
+
+    Parameters
+    ----------
+    cfg : object
+        Pipeline config object (same object stored in ``ctx.obj["cfg"]``).
+        Must expose ``cfg.download.memory_mb`` and ``cfg.predict.memory_mb``.
+    tiles_csv : str | os.PathLike
+        Path to the tiles CSV.
+    mem : int, optional
+        Override for Lambda memory (MB). Falls back to
+        ``cfg.download.memory_mb`` when ``None``.
+    include_predict : bool, default False
+        If True, also compute the prediction step cost and the grand total.
+
+    Returns
+    -------
+    dict
+        {
+            "n_tiles": int,
+            "memory_mb": int,
+            "costs": dict,                 # from estimate_cost(...)
+            "predict_memory_mb": int | None,
+            "predict_cost": float | None,
+            "grand_total": float | None,
+        }
+    """
+    from gri_tile_pipeline.steps.download_ard import estimate_cost, PRICE_PER_GB_SEC
     from gri_tile_pipeline.steps.predict import AVG_PREDICT_DURATION
     from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
 
-    cfg = ctx.obj["cfg"]
     memory = mem or cfg.download.memory_mb
     tiles = read_tiles_csv(tiles_csv)
     n = len(tiles)
-
     costs = estimate_cost(n, memory)
-    click.echo(f"Tiles: {n}, Memory: {memory} MB")
-    for task_type, avg_sec in AVG_DURATIONS.items():
-        click.echo(f"  {task_type:6s} ${costs[task_type]:.2f}  (avg {avg_sec}s x {n} jobs)")
-    click.echo(f"  Total: ${costs['total']:.2f}")
 
+    predict_memory_mb = None
+    predict_cost = None
+    grand_total = None
     if include_predict:
-        pred_mem = cfg.predict.memory_mb
-        pred_mem_gb = pred_mem / 1024.0
-        pred_cost = n * AVG_PREDICT_DURATION * pred_mem_gb * PRICE_PER_GB_SEC
-        click.echo(f"\nPrediction ({pred_mem} MB, ~{AVG_PREDICT_DURATION}s avg):")
-        click.echo(f"  Predict: ${pred_cost:.2f}")
-        click.echo(f"  Grand total: ${costs['total'] + pred_cost:.2f}")
+        predict_memory_mb = cfg.predict.memory_mb
+        pred_mem_gb = predict_memory_mb / 1024.0
+        predict_cost = n * AVG_PREDICT_DURATION * pred_mem_gb * PRICE_PER_GB_SEC
+        grand_total = costs["total"] + predict_cost
+
+    return {
+        "n_tiles": n,
+        "memory_mb": memory,
+        "costs": costs,
+        "predict_memory_mb": predict_memory_mb,
+        "predict_cost": predict_cost,
+        "grand_total": grand_total,
+    }
 
 
 # ---------------------------------------------------------------------------
