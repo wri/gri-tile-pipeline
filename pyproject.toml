@@ -87,3 +87,10 @@ filterwarnings = ["ignore::DeprecationWarning:tensorflow.*"]
 dev = [
     "matplotlib>=3.10.8",
 ]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["lithops_workers"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
