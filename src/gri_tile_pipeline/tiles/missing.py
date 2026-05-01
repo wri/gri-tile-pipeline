@@ -21,7 +21,7 @@ def generate_missing_tiles(
     *,
     short_name: str | None = None,
     framework_key: str | None = None,
-    polygon_ids: Iterable (UUID)| None = None,
+    polygon_ids: list[UUID] | None = None,
 ) -> list[dict[str, Any]]:
     """Spatial join polygons-with-missing-ttc against the tile grid.
 
