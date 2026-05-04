@@ -65,6 +65,16 @@ gri-ttc = "gri_tile_pipeline.cli:gri_ttc"
 [tool.hatch.build.targets.wheel]
 packages = ["src/gri_tile_pipeline"]
 
+# `lithops_workers.py` (under src/) and the top-level `loaders/` package live
+# outside the gri_tile_pipeline subpackage but are imported as top-level
+# modules by Lithops jobs in steps/download_ard.py, steps/predict.py, etc.
+# In editable installs they're picked up via sys.path, but a built wheel
+# would otherwise omit them, breaking any non-editable install (e.g. the
+# CPU/GPU worker Docker images that pip-install this repo from a git URL).
+[tool.hatch.build.targets.wheel.force-include]
+"src/lithops_workers.py" = "lithops_workers.py"
+"loaders" = "loaders"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
@@ -80,4 +90,6 @@ filterwarnings = ["ignore::DeprecationWarning:tensorflow.*"]
 [dependency-groups]
 dev = [
     "matplotlib>=3.10.8",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
 ]
