@@ -95,6 +95,7 @@ def gri_ttc(ctx: click.Context, config_path, log_level, log_format, verbose, qui
 # ---------------------------------------------------------------------------
 # resolve  (replaces legacy `ingest`)
 # ---------------------------------------------------------------------------
+
 @gri_ttc.command()
 @click.argument("input", required=False, default=None)
 @click.option("-o", "--output", default="tiles.csv",
@@ -204,6 +205,7 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
         "polygons_saved_to": save_polygons,
         "metadata": resolved.metadata,
     })
+
 
 # ---------------------------------------------------------------------------
 # tiles (group): missing / split / validate
@@ -1111,6 +1113,7 @@ def stats(ctx, polygons, dest, year, output, lookup_parquet, lookup_csv, include
 # ---------------------------------------------------------------------------
 # cost
 # ---------------------------------------------------------------------------
+
 @gri_ttc.command()
 @click.argument("tiles_csv", type=click.Path(exists=True))
 @click.option("--mem", type=int, default=None, help="Lambda memory in MB.")
