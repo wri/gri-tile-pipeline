@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from tests.constants import ARD_DIR, MODEL_DIR, REFERENCE_TIF
-from tests.conftest import has_ard, has_model, has_reference, has_tf
+from tests.markers import has_ard, has_model, has_reference, has_tf
 from tests.parity.metrics import compare_predictions
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
