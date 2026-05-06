@@ -215,7 +215,6 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
 def tiles():
     """Tile-CSV utilities: missing, split, validate."""
 
-
 @tiles.command("missing")
 @click.option("--geoparquet", default="temp/tm.geoparquet", show_default=True,
               help="Path to TerraMatch geoparquet.")
@@ -225,8 +224,9 @@ def tiles():
 @click.option("--framework-key", default=None, help="Filter by cohort framework_key.")
 @click.option("-o", "--output", default=None, type=click.Path(),
               help="Output tiles CSV path. Without this, prints a summary only.")
+@click.option('--delimited_polygon_ids', default=None, hidden=True)
 @click.pass_context
-def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output):
+def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output, delimited_polygon_ids):
     """Find tiles for polygons missing TTC values.
 
     \b
@@ -253,8 +253,14 @@ def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output):
         emit_json(ctx, {"command": "tiles.missing", "status": "summary", **summary})
         return
 
+    polygon_ids = (
+        [item.strip().strip("'") for item in delimited_polygon_ids.split(',')]
+        if delimited_polygon_ids is not None
+        else None
+    )
+
     tiles_list = generate_missing_tiles(
-        geoparquet, tiledb, short_name=short_name, framework_key=framework_key,
+        geoparquet, tiledb, short_name=short_name, framework_key=framework_key, polygon_ids=polygon_ids
     )
 
     if not tiles_list:

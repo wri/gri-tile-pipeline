@@ -90,3 +90,5 @@ docker/.git_sha
 # idea folder, uncomment if you don't need it
 .idea
 
+local_*
+
