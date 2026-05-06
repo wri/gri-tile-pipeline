@@ -41,7 +41,7 @@ for p in (str(REPO_ROOT), str(REPO_ROOT / "loaders")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from tests.conftest import GOLDEN_DIR, GOLDEN_TILES, MODEL_DIR
+from tests.constants import GOLDEN_DIR, GOLDEN_TILES, MODEL_DIR
 from tests.parity.metrics import aggregate_golden_report, compare_predictions
 
 
@@ -193,7 +193,7 @@ def _invoke_lambda_for_tiles(year: int, dest: str) -> dict[str, np.ndarray]:
 def _local_inference(tile_name: str) -> np.ndarray:
     """Run the local Python inference path — mirrors test_golden_parity helpers."""
     import hickle as hkl
-    from tests.conftest import GOLDEN_RAW
+    from tests.constants import GOLDEN_RAW
 
     from predict_tile import predict_tile_from_arrays  # type: ignore[import-not-found]
 

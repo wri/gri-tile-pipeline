@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tests.conftest import GOLDEN_DIR, GOLDEN_RAW, GOLDEN_TILES, MODEL_DIR
+from tests.constants import GOLDEN_DIR, GOLDEN_RAW, GOLDEN_TILES, MODEL_DIR
 from tests.parity.metrics import compare_predictions, print_parity_table
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
