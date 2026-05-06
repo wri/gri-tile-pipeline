@@ -80,7 +80,7 @@ packages = ["src/gri_tile_pipeline"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["."]
 markers = [
     "slow: tests taking >10s (deselect with -m 'not slow')",
     "parity: parity comparison against reference",
