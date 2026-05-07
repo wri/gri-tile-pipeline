@@ -73,7 +73,7 @@ gri-ttc = "gri_tile_pipeline.cli:gri_ttc"
 # lithops_workers must stay a top-level module so Lithops can pickle/unpickle
 # workers on Lambda without needing gri_tile_pipeline installed there.
 [tool.hatch.build.targets.wheel]
-packages = ["src/gri_tile_pipeline", "loaders"]
+packages = ["src/gri_tile_pipeline"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/lithops_workers.py" = "lithops_workers.py"
