@@ -9,21 +9,18 @@ from __future__ import annotations
 import os
 import sys
 import argparse
-import tempfile
 import numpy as np
 from loguru import logger
 from math import sqrt
 from pyproj import Transformer
 from typing import Tuple
 
-import obstore as obs
 from obstore.store import from_url, LocalStore
 import boto3
 from scipy.ndimage import zoom
 
 from pystac_client import Client
 from odc.stac import stac_load, configure_rio
-import hickle as hkl
 
 from gri_tile_loaders.shared import make_bbox, obstore_put_hkl
 

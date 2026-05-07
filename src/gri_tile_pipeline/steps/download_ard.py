@@ -10,7 +10,6 @@ by default.  The legacy Earth Search GRD-based S1 loader is available via
 from __future__ import annotations
 
 import os
-import time
 from typing import Any, Dict, List, Tuple
 
 import yaml
@@ -18,7 +17,7 @@ from loguru import logger
 
 from gri_tile_pipeline.config import PipelineConfig
 from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
-from gri_tile_pipeline.tracking import JobTracker, JobResult
+from gri_tile_pipeline.tracking import JobTracker
 from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
 
 
@@ -33,7 +32,6 @@ import gri_tile_pipeline.steps._lithops_path  # noqa: F401  (adds repo root to s
 
 from lithops_workers import run_dem as _run_dem
 from lithops_workers import run_s1_rtc as _run_s1_rtc
-from lithops_workers import run_s1_legacy as _run_s1_legacy
 from lithops_workers import run_s2 as _run_s2
 
 

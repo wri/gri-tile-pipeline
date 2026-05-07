@@ -18,7 +18,7 @@ import argparse
 import time
 import random
 import requests
-from datetime import datetime, timezone
+from datetime import timezone
 
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
@@ -28,9 +28,6 @@ import traceback
 import lithops
 from lithops import FunctionExecutor
 from lithops.retries import RetryingFuture
-
-import gri_tile_loaders
-from gri_tile_loaders import download_dem, download_s1, download_s2, download_s1_rtc
 
 
 # ----------------------------

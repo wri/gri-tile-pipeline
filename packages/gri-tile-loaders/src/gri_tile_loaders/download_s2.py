@@ -13,7 +13,6 @@ Produces:
 import os
 import sys
 import time
-import tempfile
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional, Union, Any
 from pathlib import Path
@@ -21,7 +20,6 @@ from pathlib import Path
 import numpy as np
 import click
 from loguru import logger
-import hickle as hkl
 import random
 
 import obstore as obs

@@ -7,10 +7,8 @@ from __future__ import annotations
 
 import json
 import os
-import random
-import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import requests
 import yaml

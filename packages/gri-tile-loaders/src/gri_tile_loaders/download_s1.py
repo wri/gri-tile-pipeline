@@ -19,7 +19,6 @@ Enhanced version with:
 import os
 import sys
 import argparse
-import tempfile
 from rasterio.session import AWSSession
 import boto3
 import rasterio as rio
@@ -35,7 +34,6 @@ from odc.stac import configure_rio
 from pystac_client import Client
 from shapely.geometry import shape, box
 from datetime import datetime
-import hickle as hkl
 import time
 from loguru import logger
 import obstore as obs
