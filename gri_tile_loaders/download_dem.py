@@ -25,7 +25,7 @@ from pystac_client import Client
 from odc.stac import stac_load, configure_rio
 import hickle as hkl
 
-from loaders.shared import make_bbox, obstore_put_hkl
+from gri_tile_loaders.shared import make_bbox, obstore_put_hkl
 
 EARTH_SEARCH_V1 = "https://earth-search.aws.element84.com/v1"
 DEM_COLLECTION = "cop-dem-glo-30"  # Earth Search v1 Copernicus DEM 30m

@@ -1,6 +1,6 @@
 """Shared utilities for loader Lambda workers.
 
-Kept in `loaders/` (rather than `src/`) so Lambda deployments stay
+Kept in `gri_tile_loaders/` (rather than `src/`) so Lambda deployments stay
 self-contained without needing the full `gri_tile_pipeline` package.
 """
 

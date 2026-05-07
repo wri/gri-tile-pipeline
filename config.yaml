@@ -9,7 +9,7 @@ lithops:
   # to resolve .lithops/<env>/config.predict.yaml, or override explicitly here.
 
 download:
-  runtime: ttc-loaders-dev
+  runtime: ttc-gri_tile_loaders-dev
   memory_mb: 4096
   retries: 3
 

@@ -27,7 +27,7 @@ from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
 # ------------------------------------
 # Workers live in lithops_workers.py so Lithops can pickle/unpickle them
 # on Lambda without needing gri_tile_pipeline installed.
-# The path import ensures loaders/ and lithops_workers are findable.
+# The path import ensures gri_tile_loaders/ and lithops_workers are findable.
 
 import gri_tile_pipeline.steps._lithops_path  # noqa: F401  (adds repo root to sys.path)
 
@@ -164,7 +164,7 @@ def run_download_ard(
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures_euc1.append((
             RetryingFuture(
-                fexec_euc1.call_async(_run_dem, (kw,), include_modules=["loaders", "lithops_workers"]),
+                fexec_euc1.call_async(_run_dem, (kw,), include_modules=["gri_tile_loaders", "lithops_workers"]),
                 _run_dem, (kw,), retries=retries,
             ),
             "DEM", "eu-central-1", tile_info,
@@ -178,7 +178,7 @@ def run_download_ard(
         s1_kw = {**kw, "sas_token": pc_sas_token}
         futures_s1.append((
             RetryingFuture(
-                fexec_s1.call_async(_run_s1_rtc, (s1_kw,), include_modules=["loaders", "lithops_workers"]),
+                fexec_s1.call_async(_run_s1_rtc, (s1_kw,), include_modules=["gri_tile_loaders", "lithops_workers"]),
                 _run_s1_rtc, (s1_kw,), retries=s1_retries,
             ),
             "S1_RTC", "us-west-2", tile_info,
@@ -190,7 +190,7 @@ def run_download_ard(
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures_usw2.append((
             RetryingFuture(
-                fexec_usw2.call_async(_run_s2, (kw,), include_modules=["loaders", "lithops_workers"]),
+                fexec_usw2.call_async(_run_s2, (kw,), include_modules=["gri_tile_loaders", "lithops_workers"]),
                 _run_s2, (kw,), retries=retries,
             ),
             "S2", "us-west-2", tile_info,
@@ -252,9 +252,9 @@ def run_download_ard_local(
 
     Returns the :class:`JobTracker` with all results.
     """
-    from loaders.download_dem import run as dem_run
-    from loaders.download_s1_rtc import run as s1_rtc_run
-    from loaders.download_s2 import run as s2_run
+    from gri_tile_loaders.download_dem import run as dem_run
+    from gri_tile_loaders.download_s1_rtc import run as s1_rtc_run
+    from gri_tile_loaders.download_s2 import run as s2_run
 
     from gri_tile_pipeline.execution import run_local_tasks
     from gri_tile_pipeline.steps.download_s1_rtc import ensure_pc_collection_token
@@ -311,9 +311,9 @@ def run_download_ard_legacy_s1_local(
 
     Returns the :class:`JobTracker` with all results.
     """
-    from loaders.download_dem import run as dem_run
-    from loaders.download_s1 import run as s1_run
-    from loaders.download_s2 import run as s2_run
+    from gri_tile_loaders.download_dem import run as dem_run
+    from gri_tile_loaders.download_s1 import run as s1_run
+    from gri_tile_loaders.download_s2 import run as s2_run
 
     from gri_tile_pipeline.execution import run_local_tasks
 

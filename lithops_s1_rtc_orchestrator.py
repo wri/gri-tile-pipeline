@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Fan out S1 RTC input data composites (VV/VH) with Lithops.
-This script is modified to use the loaders/download_s1_rtc.py script to download S1 data from the Planetary Computer, using Lithops on aws to facilitate compute and storage.
+This script is modified to use the gri_tile_loaders/download_s1_rtc.py script to download S1 data from the Planetary Computer, using Lithops on aws to facilitate compute and storage.
 Enhanced with detailed job tracking and reporting.
 
 Usage:
@@ -29,8 +29,8 @@ import lithops
 from lithops import FunctionExecutor
 from lithops.retries import RetryingFuture
 
-import loaders
-from loaders import download_dem, download_s1, download_s2, download_s1_rtc
+import gri_tile_loaders
+from gri_tile_loaders import download_dem, download_s1, download_s2, download_s1_rtc
 
 
 # ----------------------------
@@ -314,7 +314,7 @@ class JobTracker:
 # ----------------------------
 
 def _run_dem(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    from loaders.download_dem import run
+    from gri_tile_loaders.download_dem import run
     return run(**kwargs)
 
 def _run_s1(kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -325,12 +325,12 @@ def _run_s1(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """
     # De-synchronize Planetary Computer/STAC load across a large Lambda fan-out
     time.sleep(random.uniform(0.0, 2.0))
-    from loaders.download_s1_rtc import run
+    from gri_tile_loaders.download_s1_rtc import run
     # run() never raises - always returns structured dict with status field
     return run(**kwargs)
 
 def _run_s2(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    from loaders.download_s2 import run
+    from gri_tile_loaders.download_s2 import run
     return run(**kwargs)
 
 
@@ -687,9 +687,9 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--report-dir", default="job_reports",
                     help="Directory to save job tracking reports")
     ap.add_argument("--debug", action="store_true",
-                    help="Pass debug=True to the loaders' run()")
+                    help="Pass debug=True to the gri_tile_loaders' run()")
     ap.add_argument("--overwrite", action="store_true",
-                    help="Accepted for parity; loaders may decide how to handle overwrites")
+                    help="Accepted for parity; gri_tile_loaders may decide how to handle overwrites")
     return ap.parse_args()
 
 def main() -> None:
@@ -778,7 +778,7 @@ def main() -> None:
         tile_info = {k: kw[k] for k in ['year', 'lon', 'lat', 'X_tile', 'Y_tile']}
         futures_usw2.append((
             RetryingFuture(
-                fexec_usw2.call_async(_run_s1, (kw,), include_modules=['loaders']),
+                fexec_usw2.call_async(_run_s1, (kw,), include_modules=['gri_tile_loaders']),
                 _run_s1, (kw,), retries=args.retries
             ),
             'S1',

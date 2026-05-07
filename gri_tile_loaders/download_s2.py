@@ -32,7 +32,7 @@ from pystac_client import Client
 from odc.stac import load as stac_load, configure_rio
 from shapely.geometry import shape as shapely_shape
 
-from loaders.shared import make_bbox, obstore_put_hkl
+from gri_tile_loaders.shared import make_bbox, obstore_put_hkl
 
 # ----------------------------
 # Configuration

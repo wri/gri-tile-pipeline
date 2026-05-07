@@ -70,7 +70,7 @@ def test_check_lithops_env_missing_files(tmp_path, monkeypatch):
     monkeypatch.setenv("LITHOPS_ENV", "nope")
     r = check_lithops_env()
     assert r.ok is False
-    assert "config.loaders-euc1.yaml" in r.detail
+    assert "config.gri_tile_loaders-euc1.yaml" in r.detail
 
 
 def test_check_lithops_env_present(tmp_path, monkeypatch):
@@ -78,7 +78,7 @@ def test_check_lithops_env_present(tmp_path, monkeypatch):
     monkeypatch.setenv("LITHOPS_ENV", "dev")
     base = tmp_path / ".lithops" / "dev"
     base.mkdir(parents=True)
-    for name in ("config.loaders-euc1.yaml", "config.loaders-usw2.yaml",
+    for name in ("config.gri_tile_loaders-euc1.yaml", "config.gri_tile_loaders-usw2.yaml",
                  "config.s1.yaml", "config.predict.yaml"):
         (base / name).write_text("dummy")
     r = check_lithops_env()

@@ -28,11 +28,11 @@ def test_prediction_parity_baseline():
     import importlib
     import rasterio
 
-    loader_path = str(REPO_ROOT / "loaders")
+    loader_path = str(REPO_ROOT / "gri_tile_loaders")
     if loader_path not in sys.path:
         sys.path.insert(0, loader_path)
     # Force reimport in case of caching
-    from loaders import predict_tile
+    from gri_tile_loaders import predict_tile
     importlib.reload(predict_tile)
     run_local = predict_tile.run_local
 

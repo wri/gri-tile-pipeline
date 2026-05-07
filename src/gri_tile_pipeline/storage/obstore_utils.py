@@ -1,4 +1,4 @@
-"""Shared obstore helpers extracted from loaders."""
+"""Shared obstore helpers extracted from gri_tile_loaders."""
 
 from __future__ import annotations
 

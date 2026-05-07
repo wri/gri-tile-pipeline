@@ -31,7 +31,7 @@ Every step is idempotent, writes to S3 at deterministic keys, and
 ## Install
 
 ```bash
-uv sync --extra all        # library + loaders + predict + zonal + dev
+uv sync --extra all        # library + gri_tile_loaders + predict + zonal + dev
 ```
 
 Python 3.11+ is required.

@@ -49,7 +49,7 @@ import pickle
 from pathlib import Path
 from urllib.parse import urlparse
 
-from loaders.shared import make_bbox, obstore_put_hkl, compute_band_stats
+from gri_tile_loaders.shared import make_bbox, obstore_put_hkl, compute_band_stats
 
 def _elapsed_ms(t_start: float) -> float:
     return (time.perf_counter() - t_start) * 1000.0
