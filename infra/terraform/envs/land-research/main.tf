@@ -31,7 +31,12 @@ module "role" {
     module.state_use1.bucket_arn,
   ]
   output_bucket_arn = aws_s3_bucket.ttc_data.arn
-  tags              = var.tags
+  # gri-prefect-orchestration's sentinel-batch-flow stages ARD into
+  # `wri-restoration-geodata/sentinel/<project>/...`. Without this, every
+  # Lambda PUT into that bucket comes back 403 and tracker.results
+  # records the failures silently — the orchestrator only logs a warning.
+  additional_output_bucket_arns = var.additional_output_bucket_arns
+  tags                          = var.tags
 }
 
 # Dedicated TTC data bucket (ARD + predictions), co-located with the predict

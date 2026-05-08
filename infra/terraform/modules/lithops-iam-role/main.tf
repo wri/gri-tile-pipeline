@@ -47,10 +47,14 @@ data "aws_iam_policy_document" "inline" {
     sid     = "OutputBucket"
     effect  = "Allow"
     actions = ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"]
-    resources = [
-      var.output_bucket_arn,
-      "${var.output_bucket_arn}/*",
-    ]
+    resources = concat(
+      [
+        var.output_bucket_arn,
+        "${var.output_bucket_arn}/*",
+      ],
+      var.additional_output_bucket_arns,
+      [for arn in var.additional_output_bucket_arns : "${arn}/*"],
+    )
   }
 
   # External public/requester-pays buckets the loaders read from.
