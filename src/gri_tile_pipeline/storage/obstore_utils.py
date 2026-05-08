@@ -10,7 +10,12 @@ import obstore as obs
 from obstore.store import LocalStore, from_url
 
 
-def make_s3_store(bucket: str, region: str, profile: str | None = None):
+def make_s3_store(
+    bucket: str,
+    region: str,
+    profile: str | None = None,
+    prefix: str | None = None,
+):
     """Build an obstore S3Store authenticated via boto3's credential chain.
 
     obstore doesn't read ``AWS_PROFILE`` natively, so we delegate credential
@@ -22,18 +27,26 @@ def make_s3_store(bucket: str, region: str, profile: str | None = None):
 
     session = boto3.Session(profile_name=profile)
     credential_provider = Boto3CredentialProvider(session)
-    return S3Store(bucket, region=region, credential_provider=credential_provider)
+    kwargs = {"region": region, "credential_provider": credential_provider}
+    if prefix:
+        kwargs["prefix"] = prefix
+    return S3Store(bucket, **kwargs)
 
 
 def from_dest(dest: str, *, region: str = "us-east-1", profile: str | None = None):
     """Build an obstore Store from an ``s3://`` URI or local path.
 
     Uses :func:`make_s3_store` for S3 to inherit AWS credential chain
-    (profiles, env vars, SSO, etc.).
+    (profiles, env vars, SSO, etc.). When ``dest`` includes a key prefix
+    after the bucket (e.g. ``s3://bucket/sentinel/project``), the prefix
+    is propagated to the store so callers can use bucket-relative keys
+    without re-encoding the prefix at every read/write site.
     """
     if dest.startswith("s3://"):
-        bucket = dest.replace("s3://", "").split("/")[0]
-        return make_s3_store(bucket, region=region, profile=profile)
+        rest = dest[len("s3://"):]
+        bucket, _, prefix = rest.partition("/")
+        prefix = prefix.rstrip("/") or None
+        return make_s3_store(bucket, region=region, profile=profile, prefix=prefix)
     os.makedirs(dest, exist_ok=True)
     return LocalStore(prefix=dest)
 

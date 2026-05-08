@@ -14,6 +14,12 @@ variable "output_bucket_arn" {
   type        = string
 }
 
+variable "additional_output_bucket_arns" {
+  description = "Extra output bucket ARNs the Lambda role can read/write (e.g. the orchestration repo's wri-restoration-geodata bucket where sentinel-flow stages tiles)."
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   description = "Tags to apply to the role."
   type        = map(string)
