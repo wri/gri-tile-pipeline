@@ -45,7 +45,13 @@ def compute_ttc(
     if polygons_gdf is not None:
         gdf = polygons_gdf.copy()
     else:
-        gdf = gpd.read_file(polygons_path)
+        # Options instruct GDAL to parse the geometry column
+        gdf = gpd.read_file(
+            polygons_path,
+            GEOM_POSSIBLE_NAMES="geometry",
+            KEEP_GEOM_COLUMNS="NO",
+        )
+        gdf = gpd.GeoDataFrame(gdf, geometry="geometry", crs="EPSG:4326")
 
     # Fix invalid (self-intersecting) geometries, keeping them as single
     # Polygons. buffer(0) resolves self-intersections; if that produces a
