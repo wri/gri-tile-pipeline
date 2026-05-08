@@ -522,9 +522,16 @@ def predict_tile_from_arrays(
             keep = np.setdiff1d(np.arange(s2_full.shape[0]), to_drop)
             s2_full = s2_full[keep]
             s2_dates = s2_dates[keep]
-            # Also prune CLM to match
+            # Also prune CLM to match. clm can be shorter than s2_full (the
+            # clouds.hkl loader sometimes omits the trailing timesteps;
+            # downstream code handles this at line 503 via
+            # `clm[:s2_full.shape[0]]`). Filter to_drop to clm-valid
+            # indices so np.delete doesn't blow up on indices that don't
+            # exist in clm.
             if clm is not None:
-                clm = np.delete(clm, to_drop, axis=0)
+                clm_drops = to_drop[to_drop < clm.shape[0]]
+                if len(clm_drops):
+                    clm = np.delete(clm, clm_drops, axis=0)
             # Re-detect clouds on reduced image stack
             cloud_probs, fcps = identify_clouds_shadows(s2_full, dem_raw)
             # Re-merge CLM after re-detection (reference lines 959-965)
