@@ -374,6 +374,27 @@ def predict_tile_from_arrays(
     # ------------------------------------------------------------------
     # 2. Align spatial dimensions: target = 2 × s2_20 shape (reference lines 800-806)
     # ------------------------------------------------------------------
+    # First defend against a temporal-axis mismatch between the s2 arrays
+    # and s2_dates. The loader normally writes them in lockstep, but for
+    # some tiles (observed: 1749X1160Y / 1749X1161Y on PADO 2021) the
+    # s2_dates.hkl came back with one fewer entry than s2_10.hkl — every
+    # subsequent np.delete / fancy-indexing step on the two arrays then
+    # diverges, eventually surfacing as "index 23 is out of bounds for
+    # axis 0 with size 23" inside the cloud-pruning loop. Truncate the
+    # other arrays to the common length so all per-timestep operations
+    # see the same T from here on.
+    T_common = min(s2_10.shape[0], s2_20.shape[0], len(s2_dates))
+    if (s2_10.shape[0] != T_common or s2_20.shape[0] != T_common
+            or len(s2_dates) != T_common):
+        logger.warning(
+            "ARD temporal axes out of sync — truncating to T=%d "
+            "(s2_10=%d, s2_20=%d, s2_dates=%d)",
+            T_common, s2_10.shape[0], s2_20.shape[0], len(s2_dates),
+        )
+        s2_10    = s2_10[:T_common]
+        s2_20    = s2_20[:T_common]
+        s2_dates = s2_dates[:T_common]
+
     T = s2_10.shape[0]
     H = s2_20.shape[1] * 2  # target height (rows)
     W = s2_20.shape[2] * 2  # target width (cols)
