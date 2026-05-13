@@ -4,7 +4,7 @@ REPO_ROOT := ..
 
 .PHONY: help render clean gate-a docker-gitsha \
         build-loaders-usw2 build-loaders-euc1 build-s1 build-predict build-all \
-        deploy-predict update-lambda-predict
+        deploy-predict update-lambda-predict patch-ecr-policies
 
 help:
 	@echo "Targets (pass ENV=<env>, default: $(ENV)):"
@@ -17,6 +17,7 @@ help:
 	@echo "  build-all            All four runtimes"
 	@echo "  deploy-predict       Build + push predict + pin Lambda(s) to the new digest"
 	@echo "  update-lambda-predict   Re-pin predict Lambda(s) to ECR :latest (no rebuild)"
+	@echo "  patch-ecr-policies   Re-apply Lambda-read policy to every lithops_* ECR repo"
 	@echo "  clean                Remove rendered .lithops/\$$(ENV)"
 
 render:
@@ -66,7 +67,7 @@ build-all: build-loaders-usw2 build-loaders-euc1 build-s1 build-predict
 # the predict ECR repo. Effect: `make deploy-predict` is now actually
 # self-contained — your next `sentinel-batch-flow` invocation will
 # run the new code without manual `aws lambda update-function-code`.
-deploy-predict: build-predict update-lambda-predict
+deploy-predict: build-predict patch-ecr-policies update-lambda-predict
 	cd $(REPO_ROOT) && uv run lithops runtime deploy \
 	    -b aws_lambda -c .lithops/$(ENV)/config.predict.yaml ttc-predict-dev
 
@@ -107,6 +108,33 @@ update-lambda-predict:
 	    until [ "$$(aws lambda get-function --region $$REGION --function-name $$FN \
 	        --query 'Configuration.LastUpdateStatus' --output text)" = "Successful" ]; do \
 	        sleep 3 ; \
+	    done ; \
+	done ; \
+	echo "==> Done"
+
+# Re-apply the Lambda image-pull policy to every lithops_* ECR repo
+# across the three regions we use. Idempotent — set-repository-policy
+# overwrites the same allow-statement each time. Fixes the recurring
+#   AccessDeniedException: Lambda cannot access the Amazon ECR image
+# papercut where lithops's auto-created repos have no policy and
+# Lambda's service principal can't pull. Runs as part of deploy-predict
+# but stands alone for one-off recovery (e.g. after a new region or
+# Lithops version bump that creates fresh empty-policy repos).
+patch-ecr-policies:
+	@AWS_PROFILE=$${AWS_PROFILE:-AWSAdministratorAccess-058755926933} ; \
+	ACCT=$$(aws sts get-caller-identity --query Account --output text) ; \
+	POLICY='{"Version":"2008-10-17","Statement":[{"Sid":"LambdaECRImageRetrievalPolicy","Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":["ecr:BatchGetImage","ecr:GetDownloadUrlForLayer"],"Condition":{"StringLike":{"aws:sourceArn":"arn:aws:lambda:*:'$$ACCT':function:*"}}}]}' ; \
+	for REGION in us-east-1 us-west-2 eu-central-1; do \
+	    echo "==> $$REGION" ; \
+	    REPOS=$$(aws ecr describe-repositories --region $$REGION \
+	        --query "repositories[?starts_with(repositoryName, 'lithops_')].repositoryName" \
+	        --output text 2>/dev/null | tr '\t' '\n') ; \
+	    if [ -z "$$REPOS" ]; then echo "    (no lithops_* repos)"; continue; fi ; \
+	    for REPO in $$REPOS; do \
+	        echo "    patching $$REPO" ; \
+	        aws ecr set-repository-policy --region $$REGION \
+	            --repository-name "$$REPO" --policy-text "$$POLICY" \
+	            --no-cli-pager --output text > /dev/null ; \
 	    done ; \
 	done ; \
 	echo "==> Done"
