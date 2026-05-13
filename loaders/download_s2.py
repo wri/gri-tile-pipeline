@@ -53,6 +53,15 @@ CLOUD_FINAL_MAX = 0.40      # Final threshold after local weighting
 # SCL cloudy values - matching reference script
 SCL_CLOUDY = {0, 1, 2, 3, 7, 8, 9, 10, 11}  # All problematic pixels
 
+# When the per-image bad-fraction filter (quality_threshold=0.20) would
+# drop every acquisition for a tile, keep this many cleanest instead of
+# returning empty ARD. Predict's cloud-removal step nulls cloudy pixels
+# via interp_mask, so cloudy inputs yield partly-nodata outputs (correct)
+# instead of a missing tile (wrong). 3 is a compromise between
+# "enough temporal signal for the quarterly reduction" and "don't keep
+# images that are basically pure cloud".
+SCL_FALLBACK_KEEP_N = 3
+
 # Coverage requirements for quality evaluation
 MIN_COVERAGE_FRAC = 0.95  # require at least 95% bbox coverage per day/group
 
@@ -528,7 +537,52 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
     
     # Remove low quality images
     steps_to_rm = np.argwhere(quality_per_img > quality_threshold).flatten()
-    
+
+    # Fallback: don't drop *everything* over a hard threshold. Heavy-
+    # cloud tropical projects (e.g. Ghana coastal) routinely have every
+    # acquisition >20% bad, and returning an empty ARD here propagates
+    # downstream as zero-coverage tiles (predict_tile then raises
+    # NoS2DataError). Cloudy data is still useful — predict's
+    # cloud-removal step nulls cloudy pixels via interp_mask, so cloudy
+    # inputs yield partially-nodata outputs which is correct behavior.
+    # Keep the cleanest N=3 (or all, if fewer) so predict has something
+    # to chew on, and log loudly so the underlying coverage problem
+    # stays visible.
+    if quality_per_img.size and len(steps_to_rm) == len(filtered_items):
+        n_keep = min(SCL_FALLBACK_KEEP_N, len(filtered_items))
+        cleanest = np.argsort(quality_per_img)[:n_keep]
+        steps_to_rm = np.array(
+            [i for i in range(len(filtered_items)) if i not in set(cleanest.tolist())],
+            dtype=int,
+        )
+        try:
+            kept_bad = [float(quality_per_img[i]) for i in cleanest]
+            kept_labels = []
+            for i in cleanest:
+                item = filtered_items[int(i)]
+                kept_labels.append(f"{getattr(item, 'id', 'n/a')}@{getattr(item, 'datetime', None)}")
+            logger.warning(
+                "SCL fallback: every acquisition exceeded bad_frac=%.2f "
+                "(min observed=%.3f); keeping cleanest %d/%d so predict has "
+                "data to work with. Outputs will be partly nodata.",
+                quality_threshold,
+                float(np.min(quality_per_img)),
+                n_keep,
+                len(filtered_items),
+            )
+            logger.debug(
+                "SCL fallback kept indices=%s bad_frac=%s items=%s",
+                cleanest.tolist(),
+                [round(v, 3) for v in kept_bad],
+                kept_labels,
+            )
+        except Exception:
+            logger.warning(
+                "SCL fallback engaged: keeping cleanest %d/%d acquisitions",
+                n_keep,
+                len(filtered_items),
+            )
+
     if len(steps_to_rm) > 0:
         logger.info(f"Removing {len(steps_to_rm)} low quality images")
         try:
@@ -547,7 +601,7 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
         filtered_items = [item for i, item in enumerate(filtered_items) if keep_mask[i]]
         dates_to_download = [d for i, d in enumerate(dates_to_download) if keep_mask[i]]
         cirrus_img = cirrus_img[keep_mask]
-    
+
     if len(filtered_items) == 0:
         try:
             min_bad = float(np.min(quality_per_img)) if quality_per_img.size else float("nan")
