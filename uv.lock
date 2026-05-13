@@ -1006,6 +1006,8 @@ zonal = [
 [package.dev-dependencies]
 dev = [
     { name = "matplotlib" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
 ]
 
 [package.metadata]
@@ -1051,7 +1053,11 @@ requires-dist = [
 provides-extras = ["loaders", "predict", "zonal", "dev", "all"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "matplotlib", specifier = ">=3.10.8" }]
+dev = [
+    { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "pytest", specifier = ">=7.0" },
+    { name = "pytest-cov", specifier = ">=4.0" },
+]
 
 [[package]]
 name = "grpcio"
