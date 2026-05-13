@@ -144,6 +144,7 @@ def test_preprocessing_only():
     s2_dates = hkl.load(f"{ARD_DIR}/misc/s2_dates_1000X871Y.hkl")
 
     T, H, W = s2_10.shape[:3]
+    dem = sk_resize(dem, (H, W), order=1, preserve_range=True).astype(np.float32)
     print(f"S2_10: {s2_10.shape}, S2_20: {s2_20.shape}, S1: {s1.shape}, DEM: {dem.shape}")
     print(f"S2 dates: {s2_dates}")
 

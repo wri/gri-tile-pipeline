@@ -38,6 +38,7 @@ def test_feature_stack_shape_and_channels(ard_dir):
     s2_dates = hkl.load(f"{ard_dir}/misc/s2_dates_1000X871Y.hkl")
 
     T, H, W = s2_10.shape[:3]
+    dem = sk_resize(dem, (H, W), order=1, preserve_range=True).astype(np.float32)
 
     # Upsample 20m
     s2_20_up = np.zeros((T, H, W, s2_20.shape[-1]), dtype=np.float32)
