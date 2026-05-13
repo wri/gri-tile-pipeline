@@ -160,7 +160,6 @@ def test_golden_baseline(tile_name):
 
 
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
-@pytest.mark.xfail(reason="Cloud removal not yet fully ported", strict=False)
 def test_golden_improved(tile_name):
     """Tier 2: target after cloud removal improvements."""
     stats = _get_stats(tile_name)
@@ -184,7 +183,6 @@ def test_golden_improved(tile_name):
 
 
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
-@pytest.mark.xfail(reason="Production parity not yet achieved", strict=False)
 def test_golden_target(tile_name):
     """Tier 3: production quality target."""
     stats = _get_stats(tile_name)
