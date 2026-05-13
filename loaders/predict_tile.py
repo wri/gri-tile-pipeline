@@ -29,6 +29,20 @@ from loguru import logger
 from gri_tile_pipeline.phase_timer import PhaseTimer, timed
 
 
+class NoS2DataError(ValueError):
+    """No S2 acquisitions available for this tile/year.
+
+    Raised by ``predict_tile_from_arrays`` when the ARD has zero S2
+    timesteps — e.g. download_s2's STAC search returned no items, or the
+    SCL cloud filter dropped every candidate. Without S2 the predict
+    pipeline can't run (target dims H,W are derived from s2_20 shape),
+    and silently propagating an empty array surfaces downstream as an
+    ``OverflowError: cannot convert float infinity to integer`` inside
+    ``sk_resize``. Subclasses ValueError so existing ``except ValueError``
+    blocks still catch it.
+    """
+
+
 _MODEL_SHA256_CACHE: Dict[str, str] = {}
 
 # Files the Dockerfile bakes the pipeline git sha into. Checked in order;
@@ -394,6 +408,19 @@ def predict_tile_from_arrays(
         s2_10    = s2_10[:T_common]
         s2_20    = s2_20[:T_common]
         s2_dates = s2_dates[:T_common]
+
+    # H/W are derived from s2_20 below; if T==0 the spatial dims are also
+    # zero (download_s2 writes (0,0,0,N) when STAC returns no items or
+    # SCL drops every candidate), and sk_resize to a (0,0) target divides
+    # by zero in scipy.ndimage.gaussian_filter1d → int(inf) overflow.
+    # Bail out before we get there so the failure is named, not cryptic.
+    if T_common == 0:
+        raise NoS2DataError(
+            f"No S2 acquisitions for tile (s2_10={s2_10.shape}, "
+            f"s2_20={s2_20.shape}, s2_dates={s2_dates.shape}). "
+            "Check upstream download_s2 — likely STAC returned no items "
+            "or the SCL cloud filter dropped every candidate."
+        )
 
     T = s2_10.shape[0]
     H = s2_20.shape[1] * 2  # target height (rows)
@@ -962,7 +989,11 @@ def run(
         }
 
     except Exception as e:
-        logger.error(f"predict_tile failed for {tag}: {e}")
+        # Log the full traceback to CloudWatch so we can diagnose without
+        # having to fish through Lithops result dicts. The traceback is
+        # also returned in `error_traceback` (below) but CloudWatch is
+        # easier to read live.
+        logger.error(f"predict_tile failed for {tag}: {e}\n{traceback.format_exc()}")
         return {
             "status": "failed",
             "error_message": str(e),
