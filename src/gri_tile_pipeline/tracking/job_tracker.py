@@ -466,7 +466,17 @@ def wait_all_with_tracking(
             future_objects, throw_except=False, wait_dur_sec=wait_dur_sec
         )
     except KeyError as e:
-        if "exc_info" in str(e):
+        # Lithops `_call_status` reads sometimes hit a partial JSON when a
+        # Lambda completed but only flushed part of its stats; the missing
+        # key trips an unguarded `_call_status[key]` access in
+        # lithops.future.status. Per-future fallback fetches each future
+        # individually and tags ones that still error as `infra_error`, so
+        # one bad call_status doesn't take down a multi-thousand-tile run.
+        # Known keys: "exc_info" (Alex 2026-02), "func_result_size"
+        # (2026-05 — sentinel-batch-flow project 60). Add new keys here as
+        # they surface rather than blanket-catching every KeyError, which
+        # would also swallow real bugs in this fallback path itself.
+        if any(k in str(e) for k in ("exc_info", "func_result_size")):
             logger.warning(f"Lithops status error — falling back to per-future: {e}")
             results: List[Any] = []
             for rf, task_type, region, tile_info in futures:
