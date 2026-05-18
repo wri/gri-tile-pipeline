@@ -58,6 +58,114 @@ def estimate_cost(num_tiles: int, memory_mb: int) -> Dict[str, float]:
 
 
 # ------------------------------------
+# S1 RTC -> Earth Search GRD fallback
+# ------------------------------------
+
+# Planetary Computer's ``sentinel-1-rtc`` collection has patchy
+# historical coverage outside Europe; a tile with no items fails with
+# this marker (loaders/download_s1_rtc.py). AWS Earth Search GRD
+# (loaders/download_s1.py, run_s1_legacy) has much better non-EU
+# history, so re-run only the gap tiles there.
+_RTC_GAP_MARKER = "No Sentinel-1 RTC items"
+
+
+def _s1_earth_search_fallback(
+    tracker: JobTracker,
+    fexec_s1,
+    retry_s1,
+    s1_retries: int,
+    *,
+    dest: str,
+    debug: bool,
+    report_dir: str,
+) -> None:
+    """Re-run PC-RTC coverage-gap tiles via Earth Search GRD.
+
+    Only tiles whose S1_RTC result failed with the "no RTC items"
+    marker are resubmitted, so PC stays the fast default and
+    Earth-Search compute is spent only on the gap. The original
+    ``S1_RTC`` JobResult is updated **in place** from the legacy
+    attempt, so the per-tile S1 status — and the orchestration flow's
+    ``status not in (success, partial)`` gate — reflects the best of
+    RTC-or-legacy without adding duplicate tracker rows.
+    """
+    from lithops.retries import RetryingFuture
+
+    gap = [
+        r for r in tracker.results
+        if r.task_type == "S1_RTC"
+        and r.status not in ("success", "partial")
+        and _RTC_GAP_MARKER in (r.error_message or "")
+    ]
+    if not gap:
+        return
+
+    logger.warning(
+        f"S1 RTC coverage gap on {len(gap)} tile(s) — retrying via "
+        f"Earth Search GRD (run_s1_legacy)"
+    )
+    by_key = {
+        (r.tile_info["X_tile"], r.tile_info["Y_tile"], r.tile_info["year"]): r
+        for r in gap
+    }
+
+    legacy_tracker = JobTracker(report_dir)
+    futures_s1l: List[Tuple[Any, str, str, Dict[str, Any]]] = []
+    for r in gap:
+        ti = r.tile_info
+        lkw = {
+            "year": ti["year"], "lon": ti["lon"], "lat": ti["lat"],
+            "X_tile": ti["X_tile"], "Y_tile": ti["Y_tile"],
+            "dest": dest, "debug": debug,
+        }
+        futures_s1l.append((
+            RetryingFuture(
+                fexec_s1.call_async(
+                    _run_s1_legacy, (lkw,),
+                    include_modules=["loaders", "lithops_workers"],
+                ),
+                _run_s1_legacy, (lkw,), retries=s1_retries,
+            ),
+            "S1_LEGACY", "us-west-2",
+            {k: ti[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")},
+        ))
+
+    # Land legacy results in a side tracker so they don't double-count
+    # in the main tracker / the flow gate.
+    wait_all_with_tracking(retry_s1, futures_s1l, legacy_tracker)
+
+    recovered = 0
+    for lr in legacy_tracker.results:
+        key = (lr.tile_info["X_tile"], lr.tile_info["Y_tile"],
+               lr.tile_info["year"])
+        orig = by_key.get(key)
+        if orig is None:
+            continue
+        orig.status = lr.status
+        orig.result_data = lr.result_data
+        orig.duration_sec = lr.duration_sec
+        orig.stats = lr.stats
+        if lr.status in ("success", "partial"):
+            recovered += 1
+            orig.error_message = (
+                "Recovered via Earth Search GRD fallback after PC RTC "
+                "coverage gap"
+            )
+            orig.error_type = None
+        else:
+            orig.error_message = (
+                f"PC RTC gap; Earth Search GRD fallback also failed: "
+                f"{lr.error_message or 'unknown'}"
+            )
+            orig.error_type = lr.error_type
+
+    logger.info(
+        f"Earth Search GRD fallback recovered {recovered}/{len(gap)} "
+        f"S1 gap tile(s)"
+    )
+
+
+# ------------------------------------
 # Main orchestration
 # ------------------------------------
 
@@ -206,6 +314,10 @@ def run_download_ard(
         wait_all_with_tracking(retry_euc1, futures_euc1, tracker)
     if futures_s1:
         wait_all_with_tracking(retry_s1, futures_s1, tracker)
+        _s1_earth_search_fallback(
+            tracker, fexec_s1, retry_s1, s1_retries,
+            dest=dest, debug=debug, report_dir=report_dir,
+        )
     if futures_usw2:
         wait_all_with_tracking(retry_usw2, futures_usw2, tracker)
 
