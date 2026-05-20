@@ -76,8 +76,8 @@ def test_predict_parity():
           f"mean={ref[ref != 255].mean():.1f}")
 
     # Run our prediction
-    sys.path.insert(0, os.path.join(REPO_ROOT, "loaders"))
-    from loaders.predict_tile import run_local
+    sys.path.insert(0, os.path.join(REPO_ROOT, "gri_tile_loaders"))
+    from gri_tile_loaders.predict_tile import run_local
 
     os.makedirs(os.path.dirname(OUTPUT_TIF), exist_ok=True)
     ours = run_local(

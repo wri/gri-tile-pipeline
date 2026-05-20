@@ -1,7 +1,7 @@
 """Predict a single golden tile from inside the predict Docker container.
 
 Invoked by scripts/predict_container_smoke.py via `docker run`. Expects the
-repo's loaders/ and example/golden/ + models/ directories mounted at fixed
+repo's gri_tile_loaders/ and example/golden/ + models/ directories mounted at fixed
 paths inside the container (see the host script for the mount layout).
 
 Usage (inside container):
@@ -20,7 +20,7 @@ import hickle as hkl
 GOLDEN_RAW = Path("/data/golden/raw")
 MODELS = Path("/data/models")
 
-sys.path.insert(0, "/function")  # so `from loaders.predict_tile import ...` works
+sys.path.insert(0, "/function")  # so `from gri_tile_loaders.predict_tile import ...` works
 
 
 def _load_tile_arrays(tile: str) -> dict:
@@ -44,7 +44,7 @@ def main() -> None:
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
 
-    from loaders.predict_tile import predict_tile_from_arrays, _write_geotiff_local
+    from gri_tile_loaders.predict_tile import predict_tile_from_arrays, _write_geotiff_local
 
     arrays = _load_tile_arrays(args.tile)
     pred = predict_tile_from_arrays(model_path=str(MODELS), seed=42, **arrays)

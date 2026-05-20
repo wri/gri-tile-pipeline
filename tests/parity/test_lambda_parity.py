@@ -34,10 +34,10 @@ import numpy as np
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-# REPO_ROOT itself so `import loaders.predict_tile` works as a package
-# (needed for Lithops include_modules=["loaders"]).
-# REPO_ROOT/loaders so `import predict_tile` works directly (used by _local_inference).
-for p in (str(REPO_ROOT), str(REPO_ROOT / "loaders")):
+# REPO_ROOT itself so `import gri_tile_loaders.predict_tile` works as a package
+# (needed for Lithops include_modules=["gri_tile_loaders"]).
+# REPO_ROOT/gri_tile_loaders so `import predict_tile` works directly (used by _local_inference).
+for p in (str(REPO_ROOT), str(REPO_ROOT / "gri_tile_loaders")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -175,7 +175,7 @@ def _invoke_lambda_for_tiles(year: int, dest: str) -> dict[str, np.ndarray]:
     futures = [
         fexec.call_async(
             lithops_workers.run_predict, (kw,),
-            include_modules=["loaders", "lithops_workers"],
+            include_modules=["gri_tile_loaders", "lithops_workers"],
         )
         for kw in kwargs_list
     ]

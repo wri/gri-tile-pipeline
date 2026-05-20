@@ -81,8 +81,8 @@ make -C infra render ENV=land-research
 
 # Build each runtime (Lithops creates ECR repo + pushes image)
 make -C infra build-predict ENV=land-research
-make -C infra build-loaders-usw2 ENV=land-research
-make -C infra build-loaders-euc1 ENV=land-research
+make -C infra build-gri_tile_loaders-usw2 ENV=land-research
+make -C infra build-gri_tile_loaders-euc1 ENV=land-research
 make -C infra build-s1 ENV=land-research
 
 # Or all at once:
