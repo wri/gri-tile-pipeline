@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT / "loaders"))
 sys.path.insert(0, str(REPO_ROOT / "tests"))
 
-from tests.conftest import GOLDEN_DIR, GOLDEN_RAW, GOLDEN_TILES, MODEL_DIR
+from tests.constants import GOLDEN_DIR, GOLDEN_RAW, GOLDEN_TILES, MODEL_DIR
 from tests.parity.metrics import aggregate_golden_report, compare_predictions
 
 

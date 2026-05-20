@@ -8,7 +8,7 @@ tile grid to produce a deduplicated tile list.
 from __future__ import annotations
 
 from typing import Any
-
+from uuid import UUID
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 
 
@@ -21,6 +21,7 @@ def generate_missing_tiles(
     *,
     short_name: str | None = None,
     framework_key: str | None = None,
+    polygon_ids: list[UUID] | None = None,
 ) -> list[dict[str, Any]]:
     """Spatial join polygons-with-missing-ttc against the tile grid.
 
@@ -39,6 +40,15 @@ def generate_missing_tiles(
         if framework_key is not None:
             conditions.append(f"framework_key = ${param_idx}")
             params.append(framework_key)
+            param_idx += 1
+        if polygon_ids is not None:
+            # Verify that values are UUIDS
+            validated_ids = [str(u if isinstance(u, UUID) else UUID(str(u))) for u in polygon_ids]
+            if len(validated_ids) != len(polygon_ids):
+                raise ValueError('Some values in polygon_uuids are not valid uuids')
+
+            conditions.append(f"list_contains(${param_idx}, poly_uuid)")
+            params.append(validated_ids)
             param_idx += 1
 
         where = " AND ".join(conditions)
