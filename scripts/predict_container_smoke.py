@@ -29,7 +29,7 @@ IN_CONTAINER_SCRIPT = REPO_ROOT / "scripts" / "_gate_a_predict_inside_container.
 DOCKERFILE = REPO_ROOT / "docker" / "PredictDockerfile"
 GOLDEN_DIR = REPO_ROOT / "example" / "golden"
 MODELS_DIR = REPO_ROOT / "models"
-LOADERS_DIR = REPO_ROOT / "loaders"
+LOADERS_DIR = REPO_ROOT / "gri_tile_loaders"
 
 # Parity thresholds (same as tests/parity/test_golden_parity.py baseline).
 # Gate A uses the baseline tier — a green baseline means the container's
@@ -55,7 +55,7 @@ def _run_predict_in_container(tile: str, out_dir: Path) -> Path:
     cmd = [
         "docker", "run", "--rm",
         "--entrypoint", "python",
-        "-v", f"{LOADERS_DIR}:/function/loaders:ro",
+        "-v", f"{LOADERS_DIR}:/function/gri_tile_loaders:ro",
         "-v", f"{MODELS_DIR}:/data/models:ro",
         "-v", f"{GOLDEN_DIR}:/data/golden:ro",
         "-v", f"{out_dir}:/out",

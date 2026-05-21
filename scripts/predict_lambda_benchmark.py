@@ -96,7 +96,7 @@ def _submit_and_time(
     from lithops import FunctionExecutor
 
     # Both paths are required: src/ for `lithops_workers`, repo root for
-    # `loaders` (top-level package not under src/). Matches predict_lambda_smoke.py.
+    # `gri_tile_loaders` (top-level package not under src/). Matches predict_lambda_smoke.py.
     repo_root = str(REPO_ROOT)
     src_dir = str(REPO_ROOT / "src")
     for p in (repo_root, src_dir):
@@ -124,7 +124,7 @@ def _submit_and_time(
         t_sub = time.time()
         future = fexec.call_async(
             lithops_workers.run_predict, (kwargs,),
-            include_modules=["loaders", "lithops_workers"],
+            include_modules=["gri_tile_loaders", "lithops_workers"],
         )
         submissions.append((tile, t_sub, future))
 
@@ -152,7 +152,7 @@ def _submit_and_time(
                     lambda_duration = float(stats[k])
                     break
             # Phase timings come from the Lambda return dict (see
-            # loaders/predict_tile.py::run). Only present when the worker
+            # gri_tile_loaders/predict_tile.py::run). Only present when the worker
             # completed without raising.
             if isinstance(result, dict):
                 pt = result.get("phase_timings") or {}

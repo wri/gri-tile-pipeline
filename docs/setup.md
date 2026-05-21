@@ -38,7 +38,7 @@ Already set up and just want to drive the CLI? Skip to
 **Python deps**
 
 ```bash
-uv sync --extra loaders --extra predict --extra zonal --extra dev
+uv sync --extra gri_tile_loaders --extra predict --extra zonal --extra dev
 # Or the bundle: uv sync --extra all
 ```
 
