@@ -906,13 +906,35 @@ def run(
                 "s2_dates": f"{base_key}/misc/s2_dates_{tag}.hkl",
             }
             logger.info(f"Loading ARD for {tag}")
-        with timed(phase_timer, "s3_download_hkl"):
-            s2_10    = _load_hkl(store, ard_keys["s2_10"])
-            s2_20    = _load_hkl(store, ard_keys["s2_20"])
-            s1       = _load_hkl(store, ard_keys["s1"])
-            dem      = _load_hkl(store, ard_keys["dem"])
-            clouds   = _load_hkl(store, ard_keys["clouds"])
-            s2_dates = _load_hkl(store, ard_keys["s2_dates"])
+        try:
+            with timed(phase_timer, "s3_download_hkl"):
+                s2_10    = _load_hkl(store, ard_keys["s2_10"])
+                s2_20    = _load_hkl(store, ard_keys["s2_20"])
+                s1       = _load_hkl(store, ard_keys["s1"])
+                dem      = _load_hkl(store, ard_keys["dem"])
+                clouds   = _load_hkl(store, ard_keys["clouds"])
+                s2_dates = _load_hkl(store, ard_keys["s2_dates"])
+        except FileNotFoundError as e:
+            # A required ARD artifact never landed — most commonly
+            # raw/s1/<tile>.hkl, when the S1 RTC -> Earth Search GRD fallback
+            # couldn't recover the tile (download reports the S1 leg
+            # "recovered" but writes nothing). Predict can't run without it,
+            # but a single gap tile must not fail the whole batch. Return a
+            # non-fatal "partial" so run_predict's (status not in
+            # success/partial) gate skips it; the tile produces no prediction
+            # and its polygons fall through to compute_ttc's no-coverage skip.
+            # Scoped to the ARD load so a genuinely missing model/other file
+            # still surfaces as a hard failure below.
+            logger.warning(f"predict_tile no-data skip for {tag}: missing ARD artifact: {e}")
+            return {
+                "status": "partial",
+                "error_message": str(e),
+                "error_type": "no_data",
+                "tile": tag,
+                "year": year,
+                "phase_timings": phase_timer.as_dict(),
+                "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
+            }
 
         # -------------------------------------------------------
         # 2-8. Run prediction pipeline
@@ -981,6 +1003,23 @@ def run(
             "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
         }
 
+    except NoS2DataError as e:
+        # No usable S2 acquisitions for this tile — a coverage gap, not a
+        # pipeline failure. Return non-fatal "partial" so run_predict's
+        # `status not in (success, partial)` gate skips it rather than failing
+        # the whole batch; the tile's polygons fall through to compute_ttc's
+        # no-coverage skip. (Missing ARD *artifacts* are handled with the same
+        # semantics at the load step above.)
+        logger.warning(f"predict_tile no-data skip for {tag}: {e}")
+        return {
+            "status": "partial",
+            "error_message": str(e),
+            "error_type": "no_data",
+            "tile": tag,
+            "year": year,
+            "phase_timings": phase_timer.as_dict(),
+            "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
+        }
     except Exception as e:
         # Log the full traceback to CloudWatch so we can diagnose without
         # having to fish through Lithops result dicts. The traceback is
