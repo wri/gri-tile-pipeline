@@ -14,7 +14,7 @@ import csv as csv_mod
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-from gri_shared_library import get_project_root_dir
+from gri_shared_library.os_tools import get_project_root_dir
 
 from loguru import logger
 
