@@ -220,7 +220,7 @@ def tiles():
               help="Path to TerraMatch geoparquet.")
 @click.option("--tiledb", default=None,
               help="Path to tiledb.parquet (defaults to config pipeline.parquet_path).")
-@click.option('--eval_epoch', default='BASELINE', help="Eval-epoch name for filtering polygons")
+@click.option('--eval_epoch', default='BASELINE', help="Eval-epoch name for filtering polygons [BASELINE, MIDWAY, ENDLINE")
 @click.option("--short-name", default=None, help="Filter by project short_name.")
 @click.option("--framework-key", default=None, help="Filter by cohort framework_key.")
 @click.option("-o", "--output", default=None, type=click.Path(),
