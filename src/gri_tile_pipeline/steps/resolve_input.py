@@ -191,9 +191,11 @@ def _resolve_by_filter(
         framework_keys=framework_keys,
         year_override=year,
     )
+    lookup_parquet = cfg.zonal.lookup_parquet or cfg.parquet_path
+    lookup_parquet = os.path.join(PROJECT_ROOT_DIR, lookup_parquet)
     tiles = identify_tiles_for_polygons(
         gdf,
-        lookup_parquet=cfg.zonal.lookup_parquet or cfg.parquet_path,
+        lookup_parquet=lookup_parquet,
         lookup_csv=cfg.zonal.lookup_csv,
     )
     logger.info(f"Resolved {len(tiles)} tiles from {meta['n_polygons']} polygons (filter={meta['label']})")
