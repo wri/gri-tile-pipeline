@@ -7,8 +7,11 @@ tile grid to produce a deduplicated tile list.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
+
+from gri_tile_pipeline.constants import EvalEpoch
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 
 
@@ -18,6 +21,7 @@ HALF_TILE = 1.0 / 36  # half of 1/18 degree tile size
 def generate_missing_tiles(
     geoparquet: str,
     tiledb: str,
+    eval_epoch: str = 'BASELINE',
     *,
     short_name: str | None = None,
     framework_key: str | None = None,
@@ -27,11 +31,24 @@ def generate_missing_tiles(
 
     Returns tile dicts deduplicated on (year, X_tile, Y_tile), sorted by year.
     """
+    if eval_epoch is None or eval_epoch.upper() == EvalEpoch.BASELINE.name:
+        survey_year_offset = EvalEpoch.BASELINE.value
+    elif eval_epoch.upper() == EvalEpoch.MIDWAY.name:
+        survey_year_offset = EvalEpoch.MIDWAY.value
+    elif eval_epoch.upper() == EvalEpoch.ENDLINE.name:
+        survey_year_offset = EvalEpoch.ENDLINE.value
+    else:
+        raise ValueError(f"Unknown eval epoch name: {eval_epoch}")
+
     con = connect_with_spatial()
     try:
-        conditions = ["(ttc IS NULL OR cardinality(ttc) = 0)", "ST_IsValid(geom)"]
-        params: list[Any] = [geoparquet]
-        param_idx = 2
+        current_year = datetime.today().year
+
+        conditions = ["(ttc IS NULL OR cardinality(ttc) = 0 OR NOT list_contains(map_keys(ttc), YEAR(plantstart) + $2))",
+                      f"YEAR(plantstart) + $2 < $3",
+                      "ST_IsValid(geom)"]
+        params: list[Any] = [geoparquet, survey_year_offset, current_year]
+        param_idx = 4
 
         if short_name is not None:
             conditions.append(f"short_name = ${param_idx}")
@@ -57,7 +74,7 @@ def generate_missing_tiles(
 
         query = f"""
             WITH polys AS (
-                SELECT geom, YEAR(plantstart) - 1 AS yr
+                SELECT geom, YEAR(plantstart) + $2 AS yr
                 FROM read_parquet($1)
                 WHERE {where}
             )
@@ -77,6 +94,8 @@ def generate_missing_tiles(
             )
             ORDER BY p.yr, t.X_tile, t.Y_tile
         """
+
+        # debug_expanded_sql = _expand_query(query, params)
         rows = con.execute(query, params).fetchall()
     finally:
         con.close()
@@ -92,6 +111,11 @@ def generate_missing_tiles(
         for year, lon, lat, x_tile, y_tile in rows
     ]
 
+def _expand_query(query, params):
+    for i, p in enumerate(params, 1):
+        value = f"'{p}'" if isinstance(p, str) else str(p)
+        query = query.replace(f'${i}', value)
+    return query
 
 def summarize_missing(geoparquet: str) -> dict[str, Any]:
     """Return a structured summary of polygons missing TTC, by cohort and project."""

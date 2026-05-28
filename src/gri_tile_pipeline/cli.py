@@ -220,13 +220,16 @@ def tiles():
               help="Path to TerraMatch geoparquet.")
 @click.option("--tiledb", default=None,
               help="Path to tiledb.parquet (defaults to config pipeline.parquet_path).")
+@click.option('--eval_epoch', default='BASELINE', help="Eval-epoch name for filtering polygons")
 @click.option("--short-name", default=None, help="Filter by project short_name.")
 @click.option("--framework-key", default=None, help="Filter by cohort framework_key.")
 @click.option("-o", "--output", default=None, type=click.Path(),
               help="Output tiles CSV path. Without this, prints a summary only.")
-@click.option('--delimited_polygon_ids', default=None, hidden=True)
+@click.option('--delimited_polygon_ids', default=None, hidden=True,
+              help="Comma-delimited string of polygon-Ids used with or without short-name")
+
 @click.pass_context
-def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output, delimited_polygon_ids):
+def tiles_missing(ctx, geoparquet, tiledb, eval_epoch, short_name, framework_key, output, delimited_polygon_ids):
     """Find tiles for polygons missing TTC values.
 
     \b
@@ -260,7 +263,7 @@ def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output, de
     )
 
     tiles_list = generate_missing_tiles(
-        geoparquet, tiledb, short_name=short_name, framework_key=framework_key, polygon_ids=polygon_ids
+        geoparquet, tiledb, short_name=short_name, framework_key=framework_key, polygon_ids=polygon_ids, eval_epoch=eval_epoch
     )
 
     if not tiles_list:
