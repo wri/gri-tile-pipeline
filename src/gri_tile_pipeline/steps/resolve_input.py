@@ -14,8 +14,11 @@ import csv as csv_mod
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from gri_shared_library import get_project_root_dir
 
 from loguru import logger
+
+PROJECT_ROOT_DIR = get_project_root_dir()
 
 
 @dataclass
@@ -120,6 +123,7 @@ def resolve_to_tiles(
 
     if has_filter:
         geoparquet = geoparquet or "temp/tm.geoparquet"
+        geoparquet = os.path.join(PROJECT_ROOT_DIR, geoparquet)
         return _resolve_by_filter(
             geoparquet, cfg,
             year=year,

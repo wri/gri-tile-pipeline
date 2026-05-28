@@ -27,7 +27,11 @@ jobs:
 
       # Step 3: Install dependencies
       - name: Sync dependencies
-        run: uv sync --locked --all-extras --dev
+        env:
+          KENNC_REPO_PAT: ${{ secrets.KENNC_REPO_PAT }}
+        run: |
+          git config --global url."https://${KENNC_REPO_PAT}@github.com/".insteadOf "https://github.com/"
+          uv sync --locked --all-extras --dev
 
       # Step 4: Install Linux dependencies (GDAL)
       # - Disable man-db trigger (rebuilds man pages after every install; slow and useless in CI)
