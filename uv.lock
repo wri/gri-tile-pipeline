@@ -556,6 +556,7 @@ dependencies = [
     { name = "click" },
     { name = "cryptography" },
     { name = "duckdb" },
+    { name = "idna" },
     { name = "lithops" },
     { name = "loguru" },
     { name = "obstore" },
@@ -563,6 +564,7 @@ dependencies = [
     { name = "pygments" },
     { name = "pyyaml" },
     { name = "requests" },
+    { name = "urllib3" },
 ]
 
 [package.optional-dependencies]
@@ -631,6 +633,7 @@ requires-dist = [
     { name = "gri-tile-loaders", marker = "extra == 'loaders'", editable = "packages/gri-tile-loaders" },
     { name = "gri-tile-pipeline", extras = ["loaders", "predict", "zonal", "dev"], marker = "extra == 'all'" },
     { name = "hickle", marker = "extra == 'predict'", specifier = ">=5.0" },
+    { name = "idna", specifier = ">=3.15" },
     { name = "lithops", specifier = "==3.6.1" },
     { name = "loguru", specifier = ">=0.7" },
     { name = "matplotlib", marker = "extra == 'dev'", specifier = ">=3.10.8" },
@@ -653,6 +656,7 @@ requires-dist = [
     { name = "scipy", marker = "extra == 'zonal'", specifier = ">=1.11" },
     { name = "shapely", marker = "extra == 'zonal'", specifier = ">=2.0" },
     { name = "tensorflow", marker = "extra == 'predict'", specifier = ">=2.16" },
+    { name = "urllib3", specifier = ">=2.7.0" },
     { name = "werkzeug", marker = "extra == 'predict'", specifier = ">=3.1.6" },
 ]
 provides-extras = ["loaders", "predict", "zonal", "dev", "all"]
