@@ -17,7 +17,9 @@ dependencies = [
     "lithops==3.6.1",
     "requests>=2.33.0",
     "cryptography>=46.0.7",
-    "Pygments>=2.20.0"
+    "Pygments>=2.20.0",
+    "idna>=3.15", # added to resolve: https://github.com/wri/gri-tile-pipeline/security/dependabot/12
+    "urllib3>=2.7.0", # added to resolve: https://github.com/wri/gri-tile-pipeline/security/dependabot/10
 ]
 
 [project.optional-dependencies]
