@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+import pandas as pd
 from gri_shared_library.constants import EvalEpoch
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 
@@ -21,7 +22,7 @@ HALF_TILE = 1.0 / 36  # half of 1/18 degree tile size
 def generate_missing_tiles(
     geoparquet: str,
     tiledb: str,
-    outermost_eval_epoch: str = 'BASELINE',
+    outermost_eval_epoch_name: str = 'BASELINE',
     *,
     short_name: str | None = None,
     framework_key: str | None = None,
@@ -31,72 +32,79 @@ def generate_missing_tiles(
 
     Returns tile dicts deduplicated on (year, X_tile, Y_tile), sorted by year.
     """
-    if outermost_eval_epoch is None or outermost_eval_epoch.upper() == EvalEpoch.BASELINE.name:
-        survey_year_offset = EvalEpoch.BASELINE.value
-    elif outermost_eval_epoch.upper() == EvalEpoch.MIDWAY.name:
-        survey_year_offset = EvalEpoch.MIDWAY.value
-    elif outermost_eval_epoch.upper() == EvalEpoch.ENDLINE.name:
-        survey_year_offset = EvalEpoch.ENDLINE.value
-    else:
-        raise ValueError(f"Unknown eval epoch name: {outermost_eval_epoch}")
+    # Get list of offset years based on specified outermost_eval_epoch_name
+    epoch_offsets = {
+        EvalEpoch.BASELINE.name: [EvalEpoch.BASELINE.value],
+        EvalEpoch.MIDWAY.name: [EvalEpoch.BASELINE.value, EvalEpoch.MIDWAY.value],
+        EvalEpoch.ENDLINE.name: [EvalEpoch.BASELINE.value, EvalEpoch.MIDWAY.value, EvalEpoch.ENDLINE.value],
+    }
+    key = (outermost_eval_epoch_name or EvalEpoch.BASELINE.name).upper()
+    if key not in epoch_offsets:
+        raise ValueError(f"Unknown eval epoch name: {outermost_eval_epoch_name}")
+    survey_year_offsets = epoch_offsets[key]
 
+    # Loop through years, identifying missing tiles
+    current_year = datetime.today().year
+    all_years_rows = []
     con = connect_with_spatial()
     try:
-        current_year = datetime.today().year
+        for offset_year in survey_year_offsets:
+            conditions = ["(ttc IS NULL OR cardinality(ttc) = 0 OR NOT list_contains(map_keys(ttc), YEAR(plantstart) + $2))",
+                          f"YEAR(plantstart) + $2 < $3",
+                          "ST_IsValid(geom)"]
+            params: list[Any] = [geoparquet, offset_year, current_year]
+            param_idx = 4
 
-        conditions = ["(ttc IS NULL OR cardinality(ttc) = 0 OR NOT list_contains(map_keys(ttc), YEAR(plantstart) + $2))",
-                      f"YEAR(plantstart) + $2 < $3",
-                      "ST_IsValid(geom)"]
-        params: list[Any] = [geoparquet, survey_year_offset, current_year]
-        param_idx = 4
+            if short_name is not None:
+                conditions.append(f"short_name = ${param_idx}")
+                params.append(short_name)
+                param_idx += 1
+            if framework_key is not None:
+                conditions.append(f"framework_key = ${param_idx}")
+                params.append(framework_key)
+                param_idx += 1
+            if polygon_ids is not None:
+                # Verify that values are UUIDS
+                validated_ids = [str(u if isinstance(u, UUID) else UUID(str(u))) for u in polygon_ids]
+                if len(validated_ids) != len(polygon_ids):
+                    raise ValueError('Some values in polygon_uuids are not valid uuids')
 
-        if short_name is not None:
-            conditions.append(f"short_name = ${param_idx}")
-            params.append(short_name)
-            param_idx += 1
-        if framework_key is not None:
-            conditions.append(f"framework_key = ${param_idx}")
-            params.append(framework_key)
-            param_idx += 1
-        if polygon_ids is not None:
-            # Verify that values are UUIDS
-            validated_ids = [str(u if isinstance(u, UUID) else UUID(str(u))) for u in polygon_ids]
-            if len(validated_ids) != len(polygon_ids):
-                raise ValueError('Some values in polygon_uuids are not valid uuids')
+                conditions.append(f"list_contains(${param_idx}, poly_uuid)")
+                params.append(validated_ids)
+                param_idx += 1
 
-            conditions.append(f"list_contains(${param_idx}, poly_uuid)")
-            params.append(validated_ids)
-            param_idx += 1
+            where = " AND ".join(conditions)
+            params.append(tiledb)
+            tiledb_param = f"${param_idx}"
 
-        where = " AND ".join(conditions)
-        params.append(tiledb)
-        tiledb_param = f"${param_idx}"
-
-        query = f"""
-            WITH polys AS (
-                SELECT geom, YEAR(plantstart) + $2 AS yr
-                FROM read_parquet($1)
-                WHERE {where}
-            )
-            SELECT DISTINCT
-                p.yr AS year,
-                t.X AS lon,
-                t.Y AS lat,
-                t.X_tile,
-                t.Y_tile
-            FROM polys p, read_parquet({tiledb_param}) t
-            WHERE ST_Intersects(
-                p.geom,
-                ST_MakeEnvelope(
-                    t.X - {HALF_TILE}, t.Y - {HALF_TILE},
-                    t.X + {HALF_TILE}, t.Y + {HALF_TILE}
+            query = f"""
+                WITH polys AS (
+                    SELECT geom, YEAR(plantstart) + $2 AS yr
+                    FROM read_parquet($1)
+                    WHERE {where}
                 )
-            )
-            ORDER BY p.yr, t.X_tile, t.Y_tile
-        """
+                SELECT DISTINCT
+                    p.yr AS year,
+                    t.X AS lon,
+                    t.Y AS lat,
+                    t.X_tile,
+                    t.Y_tile
+                FROM polys p, read_parquet({tiledb_param}) t
+                WHERE ST_Intersects(
+                    p.geom,
+                    ST_MakeEnvelope(
+                        t.X - {HALF_TILE}, t.Y - {HALF_TILE},
+                        t.X + {HALF_TILE}, t.Y + {HALF_TILE}
+                    )
+                )
+                ORDER BY p.yr, t.X_tile, t.Y_tile
+            """
 
-        # debug_expanded_sql = _expand_query(query, params)
-        rows = con.execute(query, params).fetchall()
+            debug_expanded_sql = _expand_query(query, params)
+            this_year_rows = con.execute(query, params).fetchall()
+            all_years_rows.extend(this_year_rows)
+    except Exception as e:
+        print(f"Error on querying for missing tiles: {e}")  # or log/raise
     finally:
         con.close()
 
@@ -108,7 +116,7 @@ def generate_missing_tiles(
             "X_tile": int(x_tile),
             "Y_tile": int(y_tile),
         }
-        for year, lon, lat, x_tile, y_tile in rows
+        for year, lon, lat, x_tile, y_tile in all_years_rows
     ]
 
 def _expand_query(query, params):
