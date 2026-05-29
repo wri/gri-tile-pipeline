@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from gri_tile_pipeline.constants import EvalEpoch
+from gri_shared_library.constants import EvalEpoch
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 
 

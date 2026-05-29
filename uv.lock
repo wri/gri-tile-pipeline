@@ -518,7 +518,7 @@ wheels = [
 [[package]]
 name = "gri-shared-library"
 version = "0.1.0"
-source = { git = "https://github.com/wri/gri-shared-library.git?branch=main#77e2df2c7562232cbbdc25ed658777ceb2acf05f" }
+source = { git = "https://github.com/wri/gri-shared-library.git?branch=main#92bde1ad7c1abe02d38e31588a678f6084fa30f0" }
 dependencies = [
     { name = "boto3" },
     { name = "botocore" },

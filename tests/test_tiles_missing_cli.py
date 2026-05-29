@@ -20,7 +20,7 @@ import pytest
 from click.testing import CliRunner
 
 from gri_tile_pipeline.cli import gri_ttc
-from gri_tile_pipeline.constants import EvalEpoch
+from gri_shared_library.constants import EvalEpoch
 from gri_tile_pipeline.tiles.missing import generate_missing_tiles
 
 
