@@ -21,7 +21,7 @@ HALF_TILE = 1.0 / 36  # half of 1/18 degree tile size
 def generate_missing_tiles(
     geoparquet: str,
     tiledb: str,
-    eval_epoch: str = 'BASELINE',
+    outermost_eval_epoch: str = 'BASELINE',
     *,
     short_name: str | None = None,
     framework_key: str | None = None,
@@ -31,14 +31,14 @@ def generate_missing_tiles(
 
     Returns tile dicts deduplicated on (year, X_tile, Y_tile), sorted by year.
     """
-    if eval_epoch is None or eval_epoch.upper() == EvalEpoch.BASELINE.name:
+    if outermost_eval_epoch is None or outermost_eval_epoch.upper() == EvalEpoch.BASELINE.name:
         survey_year_offset = EvalEpoch.BASELINE.value
-    elif eval_epoch.upper() == EvalEpoch.MIDWAY.name:
+    elif outermost_eval_epoch.upper() == EvalEpoch.MIDWAY.name:
         survey_year_offset = EvalEpoch.MIDWAY.value
-    elif eval_epoch.upper() == EvalEpoch.ENDLINE.name:
+    elif outermost_eval_epoch.upper() == EvalEpoch.ENDLINE.name:
         survey_year_offset = EvalEpoch.ENDLINE.value
     else:
-        raise ValueError(f"Unknown eval epoch name: {eval_epoch}")
+        raise ValueError(f"Unknown eval epoch name: {outermost_eval_epoch}")
 
     con = connect_with_spatial()
     try:

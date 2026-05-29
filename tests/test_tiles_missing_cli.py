@@ -75,7 +75,7 @@ def invoke_missing(runner, extra_args: list[str]):
 # Unit tests: generate_missing_tiles — eval_epoch → survey_year_offset mapping
 # ---------------------------------------------------------------------------
 
-class TestEvalEpochOffsetMapping:
+class TestOutermostEvalEpochOffsetMapping:
     """Verify each epoch name drives the correct $2 parameter in the SQL query."""
 
     def _captured_offset(self, epoch) -> int:
@@ -88,7 +88,7 @@ class TestEvalEpochOffsetMapping:
             generate_missing_tiles(
                 geoparquet="fake.parquet",
                 tiledb="fake_tiledb.parquet",
-                eval_epoch=epoch,
+                outermost_eval_epoch=epoch,
             )
 
         # params = second positional arg to con.execute(query, params)
@@ -114,7 +114,7 @@ class TestEvalEpochOffsetMapping:
         """eval_epoch=None is treated as BASELINE per the implementation guard."""
         assert self._captured_offset(None) == EvalEpoch.BASELINE.value
 
-    def test_invalid_epoch_raises_value_error(self):
+    def test_invalid_outermost_epoch_raises_value_error(self):
         mock_con = MagicMock()
         with patch("gri_tile_pipeline.tiles.missing.connect_with_spatial",
                    return_value=mock_con):
@@ -122,7 +122,7 @@ class TestEvalEpochOffsetMapping:
                 generate_missing_tiles(
                     geoparquet="fake.parquet",
                     tiledb="fake_tiledb.parquet",
-                    eval_epoch="QUARTERLY",
+                    outermost_eval_epoch="QUARTERLY",
                 )
 
 
@@ -134,7 +134,7 @@ class TestTilesMissingCLI:
 
     # -- eval_epoch forwarding -----------------------------------------------
 
-    def test_default_eval_epoch_is_baseline(self, runner):
+    def test_default_outermost_eval_epoch_is_baseline(self, runner):
         with (
             patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
             patch(_WRITE_CSV),
@@ -143,46 +143,46 @@ class TestTilesMissingCLI:
 
         assert result.exit_code == 0, result.output
         _args, kwargs = mock_gen.call_args
-        assert kwargs.get("eval_epoch", "BASELINE") == "BASELINE"
+        assert kwargs.get("outermost_eval_epoch", "BASELINE") == "BASELINE"
 
-    def test_eval_epoch_baseline_forwarded(self, runner):
+    def test_outermost_eval_epoch_baseline_forwarded(self, runner):
         with (
             patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
             patch(_WRITE_CSV),
         ):
             result = invoke_missing(runner,
                                     ["--short-name", "TEST_23_XXX",
-                                     "--eval_epoch", "BASELINE"])
+                                     "--outermost_eval_epoch", "BASELINE"])
 
         assert result.exit_code == 0, result.output
         _args, kwargs = mock_gen.call_args
-        assert kwargs["eval_epoch"] == "BASELINE"
+        assert kwargs["outermost_eval_epoch"] == "BASELINE"
 
-    def test_eval_epoch_midway_forwarded(self, runner):
+    def test_outermost_eval_epoch_midway_forwarded(self, runner):
         with (
             patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
             patch(_WRITE_CSV),
         ):
             result = invoke_missing(runner,
                                     ["--short-name", "TEST_23_XXX",
-                                     "--eval_epoch", "MIDWAY"])
+                                     "--outermost_eval_epoch", "MIDWAY"])
 
         assert result.exit_code == 0, result.output
         _args, kwargs = mock_gen.call_args
-        assert kwargs["eval_epoch"] == "MIDWAY"
+        assert kwargs["outermost_eval_epoch"] == "MIDWAY"
 
-    def test_eval_epoch_endline_forwarded(self, runner):
+    def test_outermost_eval_epoch_endline_forwarded(self, runner):
         with (
             patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
             patch(_WRITE_CSV),
         ):
             result = invoke_missing(runner,
                                     ["--short-name", "TEST_23_XXX",
-                                     "--eval_epoch", "ENDLINE"])
+                                     "--outermost_eval_epoch", "ENDLINE"])
 
         assert result.exit_code == 0, result.output
         _args, kwargs = mock_gen.call_args
-        assert kwargs["eval_epoch"] == "ENDLINE"
+        assert kwargs["outermost_eval_epoch"] == "ENDLINE"
 
     # -- no-work exit --------------------------------------------------------
 
@@ -262,11 +262,11 @@ class TestTilesMissingCLI:
         ):
             result = invoke_missing(runner,
                                     ["--framework-key", "hbf",
-                                     "--eval_epoch", "MIDWAY"])
+                                     "--outermost_eval_epoch", "MIDWAY"])
 
         assert result.exit_code == 0, result.output
         _args, kwargs = mock_gen.call_args
-        assert kwargs["eval_epoch"] == "MIDWAY"
+        assert kwargs["outermost_eval_epoch"] == "MIDWAY"
         assert kwargs["framework_key"] == "hbf"
 
     def test_endline_with_short_name(self, runner):
@@ -276,9 +276,9 @@ class TestTilesMissingCLI:
         ):
             result = invoke_missing(runner,
                                     ["--short-name", "RWA_23_AEE",
-                                     "--eval_epoch", "ENDLINE"])
+                                     "--outermost_eval_epoch", "ENDLINE"])
 
         assert result.exit_code == 0, result.output
         _args, kwargs = mock_gen.call_args
-        assert kwargs["eval_epoch"] == "ENDLINE"
+        assert kwargs["outermost_eval_epoch"] == "ENDLINE"
         assert kwargs["short_name"] == "RWA_23_AEE"
