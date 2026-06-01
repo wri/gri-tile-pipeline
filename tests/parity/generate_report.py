@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import base64
 import io
-import os
 import sys
 import time
 from pathlib import Path
@@ -21,11 +20,11 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(REPO_ROOT / "loaders"))
+sys.path.insert(0, str(REPO_ROOT / "gri_tile_loaders"))
 sys.path.insert(0, str(REPO_ROOT / "tests"))
 
-from conftest import GOLDEN_DIR, GOLDEN_RAW, GOLDEN_TILES, MODEL_DIR
-from parity.metrics import aggregate_golden_report, compare_predictions
+from tests.constants import GOLDEN_DIR, GOLDEN_RAW, GOLDEN_TILES, MODEL_DIR
+from tests.parity.metrics import aggregate_golden_report, compare_predictions
 
 
 def load_golden_tile(tile_name: str) -> dict:
@@ -445,7 +444,7 @@ def main():
                         help="Include intermediate visualizations")
     args = parser.parse_args()
 
-    from predict_tile import predict_tile_from_arrays
+    from gri_tile_loaders.predict_tile import predict_tile_from_arrays
 
     all_stats = {}
     tile_sections = []

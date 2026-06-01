@@ -100,12 +100,12 @@ def _invoke_predict(
     lithops_cfg.setdefault("aws_lambda", {})["runtime"] = runtime
 
     # Import the same thin worker shim the production code uses so we test
-    # the real call path (not a direct import of loaders.predict_tile.run).
+    # the real call path (not a direct import of gri_tile_loaders.predict_tile.run).
     import importlib
     import sys as _sys
 
     # Put the repo root and src/ on sys.path so Lithops' include_modules can
-    # locate and bundle `loaders` (at repo root) and `lithops_workers` (in src/).
+    # locate and bundle `gri_tile_loaders` (at repo root) and `lithops_workers` (in src/).
     # Without this, `uv run python scripts/...` puts only scripts/ on sys.path.
     repo_root = str(Path(__file__).resolve().parents[1])
     src_dir = str(Path(__file__).resolve().parents[1] / "src")
@@ -120,7 +120,7 @@ def _invoke_predict(
     t0 = time.time()
     future = fexec.call_async(
         lithops_workers.run_predict, (kwargs,),
-        include_modules=["loaders", "lithops_workers"],
+        include_modules=["gri_tile_loaders", "lithops_workers"],
     )
     # get_result blocks and raises if the worker raised. Lithops 3.6.1
     # moved the timeout kwarg off ResponseFuture.result onto the executor,

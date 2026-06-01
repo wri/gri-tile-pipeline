@@ -6,7 +6,7 @@ pipeline:
 # one-off pin to a specific file.
 
 download:
-  runtime: ttc-loaders-dev
+  runtime: ttc-gri_tile_loaders-dev
   memory_mb: 4096
   retries: 3
 

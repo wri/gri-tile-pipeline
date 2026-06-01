@@ -215,7 +215,6 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
 def tiles():
     """Tile-CSV utilities: missing, split, validate."""
 
-
 @tiles.command("missing")
 @click.option("--geoparquet", default="temp/tm.geoparquet", show_default=True,
               help="Path to TerraMatch geoparquet.")
@@ -225,8 +224,9 @@ def tiles():
 @click.option("--framework-key", default=None, help="Filter by cohort framework_key.")
 @click.option("-o", "--output", default=None, type=click.Path(),
               help="Output tiles CSV path. Without this, prints a summary only.")
+@click.option('--delimited_polygon_ids', default=None, hidden=True)
 @click.pass_context
-def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output):
+def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output, delimited_polygon_ids):
     """Find tiles for polygons missing TTC values.
 
     \b
@@ -253,8 +253,14 @@ def tiles_missing(ctx, geoparquet, tiledb, short_name, framework_key, output):
         emit_json(ctx, {"command": "tiles.missing", "status": "summary", **summary})
         return
 
+    polygon_ids = (
+        [item.strip().strip("'") for item in delimited_polygon_ids.split(',')]
+        if delimited_polygon_ids is not None
+        else None
+    )
+
     tiles_list = generate_missing_tiles(
-        geoparquet, tiledb, short_name=short_name, framework_key=framework_key,
+        geoparquet, tiledb, short_name=short_name, framework_key=framework_key, polygon_ids=polygon_ids
     )
 
     if not tiles_list:
@@ -1121,28 +1127,90 @@ def stats(ctx, polygons, dest, year, output, lookup_parquet, lookup_csv, include
 @click.pass_context
 def cost(ctx, tiles_csv, mem, include_predict):
     """Estimate Lambda costs without executing."""
-    from gri_tile_pipeline.steps.download_ard import estimate_cost, AVG_DURATIONS, PRICE_PER_GB_SEC
+    from gri_tile_pipeline.steps.download_ard import AVG_DURATIONS
+    from gri_tile_pipeline.steps.predict import AVG_PREDICT_DURATION
+
+    result = cost_function(
+        cfg=ctx.obj["cfg"],
+        tiles_csv=tiles_csv,
+        mem=mem,
+        include_predict=include_predict,
+    )
+
+    click.echo(f"Tiles: {result['n_tiles']}, Memory: {result['memory_mb']} MB")
+    for task_type, avg_sec in AVG_DURATIONS.items():
+        click.echo(
+            f"  {task_type:6s} ${result['costs'][task_type]:.2f}  "
+            f"(avg {avg_sec}s x {result['n_tiles']} jobs)"
+        )
+    click.echo(f"  Total: ${result['costs']['total']:.2f}")
+
+    if include_predict:
+        click.echo(
+            f"\nPrediction ({result['predict_memory_mb']} MB, "
+            f"~{AVG_PREDICT_DURATION}s avg):"
+        )
+        click.echo(f"  Predict: ${result['predict_cost']:.2f}")
+        click.echo(f"  Grand total: ${result['grand_total']:.2f}")
+
+
+def cost_function(cfg, tiles_csv, mem=None, include_predict=False):
+    """Estimate Lambda costs for a tile pipeline run.
+
+    Mirrors the arguments of the ``cost`` CLI command so it can be invoked
+    programmatically (e.g. from tests) without going through Click.
+
+    Parameters
+    ----------
+    cfg : object
+        Pipeline config object (same object stored in ``ctx.obj["cfg"]``).
+        Must expose ``cfg.download.memory_mb`` and ``cfg.predict.memory_mb``.
+    tiles_csv : str | os.PathLike
+        Path to the tiles CSV.
+    mem : int, optional
+        Override for Lambda memory (MB). Falls back to
+        ``cfg.download.memory_mb`` when ``None``.
+    include_predict : bool, default False
+        If True, also compute the prediction step cost and the grand total.
+
+    Returns
+    -------
+    dict
+        {
+            "n_tiles": int,
+            "memory_mb": int,
+            "costs": dict,                 # from estimate_cost(...)
+            "predict_memory_mb": int | None,
+            "predict_cost": float | None,
+            "grand_total": float | None,
+        }
+    """
+    from gri_tile_pipeline.steps.download_ard import estimate_cost, PRICE_PER_GB_SEC
     from gri_tile_pipeline.steps.predict import AVG_PREDICT_DURATION
     from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
 
-    cfg = ctx.obj["cfg"]
     memory = mem or cfg.download.memory_mb
     tiles = read_tiles_csv(tiles_csv)
     n = len(tiles)
-
     costs = estimate_cost(n, memory)
-    click.echo(f"Tiles: {n}, Memory: {memory} MB")
-    for task_type, avg_sec in AVG_DURATIONS.items():
-        click.echo(f"  {task_type:6s} ${costs[task_type]:.2f}  (avg {avg_sec}s x {n} jobs)")
-    click.echo(f"  Total: ${costs['total']:.2f}")
 
+    predict_memory_mb = None
+    predict_cost = None
+    grand_total = None
     if include_predict:
-        pred_mem = cfg.predict.memory_mb
-        pred_mem_gb = pred_mem / 1024.0
-        pred_cost = n * AVG_PREDICT_DURATION * pred_mem_gb * PRICE_PER_GB_SEC
-        click.echo(f"\nPrediction ({pred_mem} MB, ~{AVG_PREDICT_DURATION}s avg):")
-        click.echo(f"  Predict: ${pred_cost:.2f}")
-        click.echo(f"  Grand total: ${costs['total'] + pred_cost:.2f}")
+        predict_memory_mb = cfg.predict.memory_mb
+        pred_mem_gb = predict_memory_mb / 1024.0
+        predict_cost = n * AVG_PREDICT_DURATION * pred_mem_gb * PRICE_PER_GB_SEC
+        grand_total = costs["total"] + predict_cost
+
+    return {
+        "n_tiles": n,
+        "memory_mb": memory,
+        "costs": costs,
+        "predict_memory_mb": predict_memory_mb,
+        "predict_cost": predict_cost,
+        "grand_total": grand_total,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -77,7 +77,7 @@ def check_aws_credentials(profile: Optional[str] = None) -> CheckResult:
         return CheckResult(
             "aws-credentials", ok=False,
             detail="boto3 not installed",
-            hint="pip install 'gri-tile-pipeline[loaders]' (adds boto3)",
+            hint="pip install 'gri-tile-pipeline[gri_tile_loaders]' (adds boto3)",
         )
     try:
         session = boto3.Session(profile_name=profile) if profile else boto3.Session()
@@ -111,8 +111,8 @@ def check_lithops_env() -> CheckResult:
         )
     base = Path(f".lithops/{env}")
     expected = [
-        base / "config.loaders-euc1.yaml",
-        base / "config.loaders-usw2.yaml",
+        base / "config.gri_tile_loaders-euc1.yaml",
+        base / "config.gri_tile_loaders-usw2.yaml",
         base / "config.s1.yaml",
         base / "config.predict.yaml",
     ]

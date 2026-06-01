@@ -180,7 +180,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Lazy import — predict_tile pulls in TensorFlow which is slow
-    from loaders.predict_tile import run as predict_run
+    from gri_tile_loaders.predict_tile import run as predict_run
 
     successes: list[dict] = []
     failures: list[dict] = []

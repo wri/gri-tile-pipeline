@@ -19,7 +19,6 @@ Enhanced version with:
 import os
 import sys
 import argparse
-import tempfile
 from rasterio.session import AWSSession
 import boto3
 import rasterio as rio
@@ -35,7 +34,6 @@ from odc.stac import configure_rio
 from pystac_client import Client
 from shapely.geometry import shape, box
 from datetime import datetime
-import hickle as hkl
 import time
 from loguru import logger
 import obstore as obs
@@ -49,7 +47,7 @@ import pickle
 from pathlib import Path
 from urllib.parse import urlparse
 
-from loaders.shared import make_bbox, obstore_put_hkl, compute_band_stats
+from gri_tile_loaders.shared import make_bbox, obstore_put_hkl, compute_band_stats
 
 def _elapsed_ms(t_start: float) -> float:
     return (time.perf_counter() - t_start) * 1000.0

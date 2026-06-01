@@ -128,7 +128,7 @@ def run_predict(
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures.append((
             RetryingFuture(
-                fexec.call_async(_run_predict, (kw,), include_modules=["loaders", "lithops_workers"]),
+                fexec.call_async(_run_predict, (kw,), include_modules=["gri_tile_loaders", "lithops_workers"]),
                 _run_predict, (kw,), retries=retries,
             ),
             "PREDICT", "us-west-2", tile_info,
@@ -162,7 +162,7 @@ def run_predict_local(
 
     Returns the :class:`JobTracker` with all results.
     """
-    from loaders.predict_tile import run as predict_run
+    from gri_tile_loaders.predict_tile import run as predict_run
 
     from gri_tile_pipeline.execution import run_local_tasks
 

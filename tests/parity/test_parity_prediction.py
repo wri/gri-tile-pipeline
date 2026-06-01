@@ -10,7 +10,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tests.conftest import ARD_DIR, MODEL_DIR, REFERENCE_TIF, has_ard, has_model, has_reference, has_tf
+from tests.constants import ARD_DIR, MODEL_DIR, REFERENCE_TIF
+from tests.markers import has_ard, has_model, has_reference, has_tf
 from tests.parity.metrics import compare_predictions
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -27,11 +28,11 @@ def test_prediction_parity_baseline():
     import importlib
     import rasterio
 
-    loader_path = str(REPO_ROOT / "loaders")
+    loader_path = str(REPO_ROOT / "gri_tile_loaders")
     if loader_path not in sys.path:
         sys.path.insert(0, loader_path)
     # Force reimport in case of caching
-    import predict_tile
+    from gri_tile_loaders import predict_tile
     importlib.reload(predict_tile)
     run_local = predict_tile.run_local
 

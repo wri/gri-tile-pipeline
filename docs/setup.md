@@ -46,7 +46,7 @@ docker info --format '{{.Driver}}'   # should print overlay2, not overlayfs
 **Python deps**
 
 ```bash
-uv sync --extra loaders --extra predict --extra zonal --extra dev
+uv sync --extra gri_tile_loaders --extra predict --extra zonal --extra dev
 # Or the bundle: uv sync --extra all
 ```
 

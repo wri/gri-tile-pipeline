@@ -34,14 +34,14 @@ import numpy as np
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-# REPO_ROOT itself so `import loaders.predict_tile` works as a package
-# (needed for Lithops include_modules=["loaders"]).
-# REPO_ROOT/loaders so `import predict_tile` works directly (used by _local_inference).
-for p in (str(REPO_ROOT), str(REPO_ROOT / "loaders")):
+# REPO_ROOT itself so `import gri_tile_loaders.predict_tile` works as a package
+# (needed for Lithops include_modules=["gri_tile_loaders"]).
+# REPO_ROOT/gri_tile_loaders so `import predict_tile` works directly (used by _local_inference).
+for p in (str(REPO_ROOT), str(REPO_ROOT / "gri_tile_loaders")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from tests.conftest import GOLDEN_DIR, GOLDEN_TILES, MODEL_DIR
+from tests.constants import GOLDEN_DIR, GOLDEN_TILES, MODEL_DIR
 from tests.parity.metrics import aggregate_golden_report, compare_predictions
 
 
@@ -175,7 +175,7 @@ def _invoke_lambda_for_tiles(year: int, dest: str) -> dict[str, np.ndarray]:
     futures = [
         fexec.call_async(
             lithops_workers.run_predict, (kw,),
-            include_modules=["loaders", "lithops_workers"],
+            include_modules=["gri_tile_loaders", "lithops_workers"],
         )
         for kw in kwargs_list
     ]
@@ -193,7 +193,7 @@ def _invoke_lambda_for_tiles(year: int, dest: str) -> dict[str, np.ndarray]:
 def _local_inference(tile_name: str) -> np.ndarray:
     """Run the local Python inference path — mirrors test_golden_parity helpers."""
     import hickle as hkl
-    from tests.conftest import GOLDEN_RAW
+    from tests.constants import GOLDEN_RAW
 
     from predict_tile import predict_tile_from_arrays  # type: ignore[import-not-found]
 

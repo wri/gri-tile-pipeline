@@ -18,8 +18,8 @@ def _lithops_paths_for_env(env: str) -> dict[str, str]:
     """Paths produced by infra/lithops/render.py for a given env."""
     base = f".lithops/{env}"
     return {
-        "euc1_config": f"{base}/config.loaders-euc1.yaml",
-        "usw2_config": f"{base}/config.loaders-usw2.yaml",
+        "euc1_config": f"{base}/config.gri_tile_loaders-euc1.yaml",
+        "usw2_config": f"{base}/config.gri_tile_loaders-usw2.yaml",
         "s1_usw2_config": f"{base}/config.s1.yaml",
         "predict_config": f"{base}/config.predict.yaml",
     }
@@ -27,7 +27,7 @@ def _lithops_paths_for_env(env: str) -> dict[str, str]:
 
 @dataclass
 class DownloadConfig:
-    runtime: str = "ttc-loaders-dev"
+    runtime: str = "ttc-gri_tile_loaders-dev"
     memory_mb: int = 4096
     retries: int = 3
 

@@ -66,6 +66,7 @@ and compose through the tiles CSV + `--dest` convention.
 
 ```
 gri-ttc
+├── doctor               Verify the local environment is ready to run the pipeline.
 ├── resolve              Input → canonical tiles CSV
 ├── tiles
 │   ├── missing          Tiles for polygons with null TTC
@@ -87,6 +88,7 @@ gri-ttc
     ├── show <id>        Full summary for one run
     ├── failed <id>      Emit a retryable failed-tiles CSV
     └── retry <id>       Suggest the retry command
+├── tm_patch             Pushes ttc results up to TerraMatch
 ```
 
 ### Unified input resolution

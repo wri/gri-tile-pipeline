@@ -67,7 +67,13 @@ def run_zonal_stats(
     csv = lookup_csv or cfg.zonal.lookup_csv
     lookup = load_tile_lookup(parquet_path=parquet, lookup_csv=csv)
 
-    polygons_gdf = gpd.read_file(polygons)
+    # Options instruct GDAL to parse the geometry column
+    polygons_gdf = gpd.read_file(
+        polygons,
+        GEOM_POSSIBLE_NAMES="geometry",
+        KEEP_GEOM_COLUMNS="NO",
+    )
+    polygons_gdf = gpd.GeoDataFrame(polygons_gdf, geometry="geometry", crs="EPSG:4326")
 
     # Ensure globally unique poly_uuid before clustering
     if "poly_uuid" not in polygons_gdf.columns:
