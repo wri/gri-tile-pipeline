@@ -147,7 +147,8 @@ def list_polygons_missing_ttc(
                 _construct_where_clause_for_geoparquet(geoparquet, short_name, framework_key, offset_year, polygon_ids))
 
             query = f"""
-                    SELECT YEAR(plantstart) + $2 AS eval_year, poly_uuid
+                    SELECT YEAR(plantstart) + $2 AS eval_year, project_id, short_name as project_short_name,
+                     poly_uuid, ST_AsText(geom) as geometry
                     FROM read_parquet($1)
                     WHERE {where_clause}
                     """
@@ -162,9 +163,12 @@ def list_polygons_missing_ttc(
     return [
         {
             "eval_year": int(eval_year),
-            "poly_uuid": poly_uuid
+            "project_id": project_id,
+            "project_short_name": project_short_name,
+            "poly_uuid": poly_uuid,
+            "geometry": geometry,
         }
-        for eval_year, poly_uuid in all_years_rows
+        for eval_year, project_id, project_short_name, poly_uuid, geometry in all_years_rows
     ]
 
 
@@ -224,4 +228,3 @@ def _expand_query(query, params):
         value = f"'{p}'" if isinstance(p, str) else str(p)
         query = query.replace(f'${i}', value)
     return query
-

@@ -57,9 +57,9 @@ def read_tiles_csv(path: str) -> List[Dict[str, Any]]:
 
 def write_tiles_csv(path: str, tiles: List[Dict[str, Any]]) -> None:
     """Write a list of tile dicts back to the standard CSV format."""
-    fieldnames = ["Year", "X", "Y", "Y_tile", "X_tile"]
+    csv_fieldnames = ["Year", "X", "Y", "Y_tile", "X_tile"]
     with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=csv_fieldnames)
         writer.writeheader()
         for t in tiles:
             writer.writerow({
@@ -73,12 +73,15 @@ def write_tiles_csv(path: str, tiles: List[Dict[str, Any]]) -> None:
 
 def write_polygons_csv(path: str, polygons: List[Dict[str, Any]]) -> None:
     """Write a list of tile dicts back to the standard CSV format."""
-    fieldnames = ["Eval_year", "Poly_uuid"]
+    csv_fieldnames = ["Year", "project_id", "project_short_name", "poly_uuid", "geometry"]
     with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=csv_fieldnames)
         writer.writeheader()
-        for t in polygons:
+        for p in polygons:
             writer.writerow({
-                "Year": t["Eval_year"],
-                "poly_uuid": t["poly_uuid"],
+                "Year": p["eval_year"],
+                "project_id": p["project_id"],
+                "project_short_name": p["project_short_name"],
+                "poly_uuid": p["poly_uuid"],
+                "geometry": p["geometry"],
             })
