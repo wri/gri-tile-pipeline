@@ -69,3 +69,16 @@ def write_tiles_csv(path: str, tiles: List[Dict[str, Any]]) -> None:
                 "Y_tile": t["Y_tile"],
                 "X_tile": t["X_tile"],
             })
+
+
+def write_polygons_csv(path: str, polygons: List[Dict[str, Any]]) -> None:
+    """Write a list of tile dicts back to the standard CSV format."""
+    fieldnames = ["Eval_year", "Poly_uuid"]
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for t in polygons:
+            writer.writerow({
+                "Year": t["Eval_year"],
+                "poly_uuid": t["poly_uuid"],
+            })

@@ -207,6 +207,63 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
     })
 
 
+@gri_ttc.command(name="polygons-missing-ttc")
+@click.option("--geoparquet", default="temp/tm.geoparquet", show_default=True,
+              help="Path to TerraMatch geoparquet.")
+@click.option('--outermost_eval_epoch_name', default='BASELINE',
+              help="Eval-epoch name for filtering polygons [BASELINE, MIDWAY, ENDLINE")
+@click.option("--short-name", default=None, help="Filter by project short_name.")
+@click.option("--framework-key", default=None, help="Filter by cohort framework_key.")
+@click.option('--delimited_polygon_ids', default=None, hidden=True,
+              help="Comma-delimited string of polygon-Ids used with or without short-name")
+@click.option("-o", "--output", required=True,  type=click.Path(),
+              help="Output tiles CSV path.")
+
+@click.pass_context
+def polygons_missing_ttc(ctx, geoparquet, outermost_eval_epoch_name, short_name, framework_key, delimited_polygon_ids,
+                         output):
+    """Find polygons missing ttc for specified eval epoch
+
+    \b
+    Examples:
+        gri-ttc polygons_missing_ttc --short-name RWA_23_AEE -o missing.csv
+        gri-ttc polygons_missing_ttc --framework-key hbf -o hbf_missing.csv
+    """
+    from gri_tile_pipeline.cli_context import emit_json
+    from gri_tile_pipeline.tiles.csv_io import write_polygons_csv
+    from gri_tile_pipeline.tiles.missing import list_polygons_missing_ttc
+
+    polygon_ids = (
+        [item.strip().strip("'") for item in delimited_polygon_ids.split(',')]
+        if delimited_polygon_ids is not None
+        else None
+    )
+
+    polygons_list = list_polygons_missing_ttc(
+        geoparquet, outermost_eval_epoch_name=outermost_eval_epoch_name,
+        short_name=short_name, framework_key=framework_key, polygon_ids=polygon_ids
+    )
+
+    if not polygons_list:
+        logger.warning("No polygons with missing-TTC matched the filter.")
+        emit_json(ctx, {"command": "polygons_missing_ttc", "status": "no_work", "n_polygons": 0})
+        ctx.exit(ExitCode.NO_WORK)
+        return
+
+    if output:
+        write_polygons_csv(output, polygons_list)
+        logger.info(f"Wrote {len(polygons_list)} polygons to {output}")
+
+    year_counts: dict[int, int] = {}
+    for t in polygons_list:
+        year_counts[t["year"]] = year_counts.get(t["year"], 0) + 1
+    emit_json(ctx, {
+        "command": "polygons_missing_ttc", "status": "ok",
+        "n_polygons": len(polygons_list), "output": output,
+        "by_year": year_counts,
+    })
+
+
 # ---------------------------------------------------------------------------
 # tiles (group): missing / split / validate
 # ---------------------------------------------------------------------------
@@ -220,16 +277,18 @@ def tiles():
               help="Path to TerraMatch geoparquet.")
 @click.option("--tiledb", default=None,
               help="Path to tiledb.parquet (defaults to config pipeline.parquet_path).")
-@click.option('--outermost_eval_epoch_name', default='BASELINE', help="Eval-epoch name for filtering polygons [BASELINE, MIDWAY, ENDLINE")
+@click.option('--outermost_eval_epoch_name', default='BASELINE',
+              help="Eval-epoch name for filtering polygons [BASELINE, MIDWAY, ENDLINE")
 @click.option("--short-name", default=None, help="Filter by project short_name.")
 @click.option("--framework-key", default=None, help="Filter by cohort framework_key.")
-@click.option("-o", "--output", default=None, type=click.Path(),
-              help="Output tiles CSV path. Without this, prints a summary only.")
 @click.option('--delimited_polygon_ids', default=None, hidden=True,
               help="Comma-delimited string of polygon-Ids used with or without short-name")
+@click.option("-o", "--output", default=None, type=click.Path(),
+              help="Output tiles CSV path. Without this, prints a summary only.")
 
 @click.pass_context
-def tiles_missing(ctx, geoparquet, tiledb, outermost_eval_epoch_name, short_name, framework_key, output, delimited_polygon_ids):
+def tiles_missing(ctx, geoparquet, tiledb, outermost_eval_epoch_name, short_name, framework_key, delimited_polygon_ids,
+                  output):
     """Find tiles for polygons missing TTC values.
 
     \b
@@ -263,7 +322,9 @@ def tiles_missing(ctx, geoparquet, tiledb, outermost_eval_epoch_name, short_name
     )
 
     tiles_list = generate_missing_tiles(
-        geoparquet, tiledb, short_name=short_name, framework_key=framework_key, polygon_ids=polygon_ids, outermost_eval_epoch_name=outermost_eval_epoch_name
+        geoparquet, tiledb, outermost_eval_epoch_name=outermost_eval_epoch_name,
+        short_name=short_name, framework_key=framework_key, polygon_ids=polygon_ids,
+
     )
 
     if not tiles_list:
