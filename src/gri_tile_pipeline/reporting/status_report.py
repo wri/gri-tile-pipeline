@@ -75,6 +75,12 @@ def _build_filter(
     poly_uuids = poly_uuids or []
     cohorts = cohorts or []
 
+    # precautionary remove leading/trailing spaces from strings in lists
+    project_ids = [s.strip() for s in project_ids]
+    short_names = [s.strip() for s in short_names]
+    framework_keys = [s.strip() for s in framework_keys]
+    poly_uuids = [s.strip() for s in poly_uuids]
+
     if input_csv:
         con.execute(
             "CREATE OR REPLACE TEMP TABLE request_input AS "

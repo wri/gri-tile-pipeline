@@ -148,7 +148,7 @@ def list_polygons_missing_ttc(
 
             query = f"""
                     SELECT YEAR(plantstart) + $2 AS eval_year, project_id, short_name as project_short_name,
-                     poly_uuid, ST_AsText(geom) as geometry
+                     poly_uuid, plantstart, ST_AsText(geom) as geometry
                     FROM read_parquet($1)
                     WHERE {where_clause}
                     """
@@ -166,9 +166,10 @@ def list_polygons_missing_ttc(
             "project_id": project_id,
             "project_short_name": project_short_name,
             "poly_uuid": poly_uuid,
+            "plantstart": plantstart,
             "geometry": geometry,
         }
-        for eval_year, project_id, project_short_name, poly_uuid, geometry in all_years_rows
+        for eval_year, project_id, project_short_name, poly_uuid, plantstart, geometry in all_years_rows
     ]
 
 
