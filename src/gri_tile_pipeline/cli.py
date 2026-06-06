@@ -305,7 +305,7 @@ def tiles_missing(ctx, geoparquet, tiledb, outermost_eval_epoch_name, short_name
     tiledb = tiledb or gri.cfg.parquet_path
 
     if output is None and short_name is None and framework_key is None:
-        summary = summarize_missing(geoparquet)
+        summary = summarize_missing(geoparquet, outermost_eval_epoch_name)
         if not gri.json_mode:
             click.echo(f"Total polygons missing TTC: {summary['total_missing']:,}\n")
             click.echo("By cohort:")

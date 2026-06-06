@@ -67,7 +67,7 @@ def generate_missing_tiles(
                 )
                 ORDER BY p.yr, t.X_tile, t.Y_tile
             """
-            # debug_expanded_sql = _expand_query(query, params)
+            # debug_expanded_sql = _debug_expand_query(query, params)
             this_year_rows = con.execute(query, params).fetchall()
             all_years_rows.extend(this_year_rows)
     except Exception as e:
@@ -87,28 +87,49 @@ def generate_missing_tiles(
     ]
 
 
-def summarize_missing(geoparquet: str) -> dict[str, Any]:
+def summarize_missing(
+    geoparquet: str,
+    outermost_eval_epoch_name: str = 'BASELINE',
+) -> dict[str, Any]:
     """Return a structured summary of polygons missing TTC, by cohort and project."""
-    # TODO: Update to summarize by eval epoch
+    import re
+    survey_year_offsets = _get_survey_year_offssets(outermost_eval_epoch_name)
+
+    subqueries: list[str] = []
+    all_params: list[Any] = []
+
+    for offset_year in survey_year_offsets:
+        where_clause, params, _ = _construct_where_clause_for_geoparquet(
+            geoparquet, None, None, offset_year, None
+        )
+        shift = len(all_params)
+        shifted_where = re.sub(r'\$(\d+)', lambda m: f'${int(m.group(1)) + shift}', where_clause)
+        subqueries.append(
+            f"SELECT poly_uuid, framework_key, short_name "
+            f"FROM read_parquet(${1 + shift}) WHERE {shifted_where}"
+        )
+        all_params.extend(params)
+
+    union_sql = " UNION ".join(subqueries)
+
     con = connect_with_spatial()
     try:
         cohort_rows = con.execute(
-            """
+            f"""
             SELECT framework_key, COUNT(*) as cnt
-            FROM read_parquet($1)
-            WHERE ttc IS NULL OR cardinality(ttc) = 0
+            FROM ({union_sql})
             GROUP BY 1 ORDER BY cnt DESC
             """,
-            [geoparquet],
+            all_params,
         ).fetchall()
         project_rows = con.execute(
-            """
+            f"""
             SELECT short_name, framework_key, COUNT(*) as cnt
-            FROM read_parquet($1)
-            WHERE ttc IS NULL OR cardinality(ttc) = 0
-            GROUP BY 1, 2 ORDER BY cnt DESC
+            FROM ({union_sql})
+            GROUP BY 1, 2
+            ORDER BY cnt DESC
             """,
-            [geoparquet],
+            all_params,
         ).fetchall()
     finally:
         con.close()
@@ -152,7 +173,7 @@ def list_polygons_missing_ttc(
                     FROM read_parquet($1)
                     WHERE {where_clause}
                     """
-            debug_expanded_sql = _expand_query(query, params)
+            # debug_expanded_sql = _debug_expand_query(query, params)
             this_year_rows = con.execute(query, params).fetchall()
             all_years_rows.extend(this_year_rows)
     except Exception as e:
@@ -224,7 +245,7 @@ def _construct_where_clause_for_geoparquet(
     return where_clause, params, param_idx
 
 
-def _expand_query(query, params):
+def _debug_expand_query(query, params):
     for i, p in enumerate(params, 1):
         value = f"'{p}'" if isinstance(p, str) else str(p)
         query = query.replace(f'${i}', value)
