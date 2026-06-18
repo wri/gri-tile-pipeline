@@ -139,7 +139,7 @@ def build_indicator(row: dict, spec: IndicatorSpec) -> dict:
         )
 
     if (isinstance(row.get(spec.percent_column), str) and
-            row.get(spec.percent_column).lower() == FORCE_NULL_PATCH_KEYWORD):
+            row.get(spec.percent_column).upper() == FORCE_NULL_PATCH_KEYWORD.upper()):
         percent = None
     else:
         percent = _coerce_float(row.get(spec.percent_column))
