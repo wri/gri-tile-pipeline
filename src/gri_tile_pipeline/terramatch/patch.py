@@ -10,10 +10,12 @@ Matches each row's ``poly_uuid`` against the ids returned by
 from __future__ import annotations
 
 import math
+import pandas as pd
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Literal, Optional
 
+from gri_shared_library.constants import FORCE_NULL_PATCH_KEYWORD
 from loguru import logger
 
 from gri_tile_pipeline.terramatch.client import TMApiError, TMClient
@@ -136,11 +138,15 @@ def build_indicator(row: dict, spec: IndicatorSpec) -> dict:
             f"no year available (pass --year or include {spec.year_column!r} column)"
         )
 
-    percent = _coerce_float(row.get(spec.percent_column))
-    if percent is None:
-        raise ValueError(
-            f"row missing numeric {spec.percent_column!r} column"
-        )
+    if (isinstance(row.get(spec.percent_column), str) and
+            row.get(spec.percent_column).upper() == FORCE_NULL_PATCH_KEYWORD.upper()):
+        percent = None
+    else:
+        percent = _coerce_float(row.get(spec.percent_column))
+        if percent is None:
+            raise ValueError(
+                f"row missing numeric {spec.percent_column!r} column"
+            )
 
     indicator: dict = {
         "indicatorSlug": spec.slug,
