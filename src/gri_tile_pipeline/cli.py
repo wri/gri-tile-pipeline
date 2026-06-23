@@ -256,7 +256,7 @@ def polygons_missing_ttc(ctx, geoparquet, outermost_eval_epoch_name, short_name,
 
     year_counts: dict[int, int] = {}
     for t in polygons_list:
-        year_counts[t["year"]] = year_counts.get(t["year"], 0) + 1
+        year_counts[t["eval_year"]] = year_counts.get(t["eval_year"], 0) + 1
     emit_json(ctx, {
         "command": "polygons_missing_ttc", "status": "ok",
         "n_polygons": len(polygons_list), "output": output,

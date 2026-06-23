@@ -11,8 +11,9 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-import pandas as pd
 from gri_shared_library.constants import EvalEpoch
+from gri_shared_library.utils import debug_expand_number_parameterized_duckdb_query
+
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 
 
@@ -31,6 +32,11 @@ def generate_missing_tiles(
     """Spatial join polygons-with-missing-ttc against the tile grid.
 
     Returns tile dicts deduplicated on (year, X_tile, Y_tile), sorted by year.
+
+    Raises:
+        Any exception from the underlying DuckDB query. Failures are *not*
+        swallowed: a query error must not be reported to callers as an empty
+        (or partial) result, otherwise a genuine failure is a silently truncated output.
     """
     survey_year_offsets = _get_survey_year_offssets(outermost_eval_epoch_name)
 
@@ -67,11 +73,9 @@ def generate_missing_tiles(
                 )
                 ORDER BY p.yr, t.X_tile, t.Y_tile
             """
-            # debug_expanded_sql = _debug_expand_query(query, params)
+            # debug_expanded_sql = debug_expand_number_parameterized_duckdb_query(query, params)
             this_year_rows = con.execute(query, params).fetchall()
             all_years_rows.extend(this_year_rows)
-    except Exception as e:
-        print(f"Error on querying for missing tiles: {e}")  # or log/raise
     finally:
         con.close()
 
@@ -156,6 +160,10 @@ def list_polygons_missing_ttc(
     ) -> list[dict[str, Any]]:
     """
     Returns polygon ids for polygons missing ttc for specified outermost eval epoch.
+
+    Raises:
+        Any exception from the underlying DuckDB query. Failures are *not*
+        swallowed: see ``generate_missing_tiles``.
     """
     survey_year_offsets = _get_survey_year_offssets(outermost_eval_epoch_name)
 
@@ -173,11 +181,9 @@ def list_polygons_missing_ttc(
                     FROM read_parquet($1)
                     WHERE {where_clause}
                     """
-            # debug_expanded_sql = _debug_expand_query(query, params)
+            # debug_expanded_sql = debug_expand_number_parameterized_duckdb_query(query, params)
             this_year_rows = con.execute(query, params).fetchall()
             all_years_rows.extend(this_year_rows)
-    except Exception as e:
-        print(f"Error on querying for missing polygon ttc: {e}")  # or log/raise
     finally:
         con.close()
 
@@ -243,10 +249,3 @@ def _construct_where_clause_for_geoparquet(
 
     where_clause = " AND ".join(conditions)
     return where_clause, params, param_idx
-
-
-def _debug_expand_query(query, params):
-    for i, p in enumerate(params, 1):
-        value = f"'{p}'" if isinstance(p, str) else str(p)
-        query = query.replace(f'${i}', value)
-    return query

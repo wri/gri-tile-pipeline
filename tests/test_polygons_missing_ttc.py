@@ -10,9 +10,9 @@ from gri_tile_pipeline.cli import gri_ttc
 
 
 MOCK_POLYGONS = [
-    {"polygon_id": "poly-1", "year": 2023},
-    {"polygon_id": "poly-2", "year": 2023},
-    {"polygon_id": "poly-3", "year": 2024},
+    {"polygon_id": "poly-1", "eval_year": 2023},
+    {"polygon_id": "poly-2", "eval_year": 2023},
+    {"polygon_id": "poly-3", "eval_year": 2024},
 ]
 
 PATCH_LIST = "gri_tile_pipeline.tiles.missing.list_polygons_missing_ttc"
@@ -185,9 +185,9 @@ def test_single_polygon_id(mock_list, mock_write, mock_emit, runner):
 @patch(PATCH_EMIT)
 @patch(PATCH_WRITE)
 @patch(PATCH_LIST, return_value=[
-    {"polygon_id": "a", "year": 2022},
-    {"polygon_id": "b", "year": 2022},
-    {"polygon_id": "c", "year": 2022},
+    {"polygon_id": "a", "eval_year": 2022},
+    {"polygon_id": "b", "eval_year": 2022},
+    {"polygon_id": "c", "eval_year": 2022},
 ])
 def test_by_year_counts(mock_list, mock_write, mock_emit, runner):
     invoke(runner, ["-o", "out.csv"])
