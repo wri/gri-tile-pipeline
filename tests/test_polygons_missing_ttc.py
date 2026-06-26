@@ -56,7 +56,7 @@ def test_ok_writes_csv_and_emits(mock_list, mock_write, mock_emit, runner):
     assert result.exit_code == 0
     mock_list.assert_called_once_with(
         "temp/tm.geoparquet",
-        outermost_eval_epoch_name="BASELINE",
+        outermost_project_phase_name="BASELINE",
         short_name=None,
         framework_key=None,
         polygon_ids=None,
@@ -97,7 +97,7 @@ def test_short_name_forwarded(mock_list, mock_write, mock_emit, runner):
 
     mock_list.assert_called_once_with(
         "temp/tm.geoparquet",
-        outermost_eval_epoch_name="BASELINE",
+        outermost_project_phase_name="BASELINE",
         short_name="RWA_23_AEE",
         framework_key=None,
         polygon_ids=None,
@@ -112,7 +112,7 @@ def test_framework_key_forwarded(mock_list, mock_write, mock_emit, runner):
 
     mock_list.assert_called_once_with(
         "temp/tm.geoparquet",
-        outermost_eval_epoch_name="BASELINE",
+        outermost_project_phase_name="BASELINE",
         short_name=None,
         framework_key="hbf",
         polygon_ids=None,
@@ -122,12 +122,12 @@ def test_framework_key_forwarded(mock_list, mock_write, mock_emit, runner):
 @patch(PATCH_EMIT)
 @patch(PATCH_WRITE)
 @patch(PATCH_LIST, return_value=MOCK_POLYGONS)
-def test_eval_epoch_forwarded(mock_list, mock_write, mock_emit, runner):
-    invoke(runner, ["--outermost_eval_epoch_name", "ENDLINE", "-o", "out.csv"])
+def test_project_phase_forwarded(mock_list, mock_write, mock_emit, runner):
+    invoke(runner, ["--outermost_project_phase_name", "ENDLINE", "-o", "out.csv"])
 
     mock_list.assert_called_once_with(
         "temp/tm.geoparquet",
-        outermost_eval_epoch_name="ENDLINE",
+        outermost_project_phase_name="ENDLINE",
         short_name=None,
         framework_key=None,
         polygon_ids=None,
@@ -142,7 +142,7 @@ def test_custom_geoparquet_path(mock_list, mock_write, mock_emit, runner):
 
     mock_list.assert_called_once_with(
         "data/custom.geoparquet",
-        outermost_eval_epoch_name="BASELINE",
+        outermost_project_phase_name="BASELINE",
         short_name=None,
         framework_key=None,
         polygon_ids=None,
@@ -161,7 +161,7 @@ def test_delimited_polygon_ids_parsed(mock_list, mock_write, mock_emit, runner):
 
     mock_list.assert_called_once_with(
         "temp/tm.geoparquet",
-        outermost_eval_epoch_name="BASELINE",
+        outermost_project_phase_name="BASELINE",
         short_name=None,
         framework_key=None,
         polygon_ids=["id-1", "id-2", "id-3"],

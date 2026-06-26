@@ -210,8 +210,8 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
 @gri_ttc.command(name="polygons-missing-ttc")
 @click.option("--geoparquet", default="temp/tm.geoparquet", show_default=True,
               help="Path to TerraMatch geoparquet.")
-@click.option('--outermost_eval_epoch_name', default='BASELINE',
-              help="Eval-epoch name for filtering polygons [BASELINE, MIDWAY, ENDLINE")
+@click.option('--outermost_project_phase_name', default='BASELINE',
+              help="Eval-epoch name for filtering polygons [BASELINE, EARLY_INSIGHTS, ENDLINE")
 @click.option("--short-name", default=None, help="Filter by project short_name.")
 @click.option("--framework-key", default=None, help="Filter by cohort framework_key.")
 @click.option('--delimited_polygon_ids', default=None, hidden=True,
@@ -220,9 +220,9 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
               help="Output tiles CSV path.")
 
 @click.pass_context
-def polygons_missing_ttc(ctx, geoparquet, outermost_eval_epoch_name, short_name, framework_key, delimited_polygon_ids,
+def polygons_missing_ttc(ctx, geoparquet, outermost_project_phase_name, short_name, framework_key, delimited_polygon_ids,
                          output):
-    """Find polygons missing ttc for specified eval epoch
+    """Find polygons missing ttc for specified project phase
 
     \b
     Examples:
@@ -240,7 +240,7 @@ def polygons_missing_ttc(ctx, geoparquet, outermost_eval_epoch_name, short_name,
     )
 
     polygons_list = list_polygons_missing_ttc(
-        geoparquet, outermost_eval_epoch_name=outermost_eval_epoch_name,
+        geoparquet, outermost_project_phase_name=outermost_project_phase_name,
         short_name=short_name, framework_key=framework_key, polygon_ids=polygon_ids
     )
 
@@ -277,8 +277,8 @@ def tiles():
               help="Path to TerraMatch geoparquet.")
 @click.option("--tiledb", default=None,
               help="Path to tiledb.parquet (defaults to config pipeline.parquet_path).")
-@click.option('--outermost_eval_epoch_name', default='BASELINE',
-              help="Eval-epoch name for filtering polygons [BASELINE, MIDWAY, ENDLINE")
+@click.option('--outermost_project_phase_name', default='BASELINE',
+              help="Eval-epoch name for filtering polygons [BASELINE, EARLY_INSIGHTS, ENDLINE")
 @click.option("--short-name", default=None, help="Filter by project short_name.")
 @click.option("--framework-key", default=None, help="Filter by cohort framework_key.")
 @click.option('--delimited_polygon_ids', default=None, hidden=True,
@@ -287,9 +287,11 @@ def tiles():
               help="Output tiles CSV path. Without this, prints a summary only.")
 
 @click.pass_context
-def tiles_missing(ctx, geoparquet, tiledb, outermost_eval_epoch_name, short_name, framework_key, delimited_polygon_ids,
+def tiles_missing(ctx, geoparquet, tiledb, outermost_project_phase_name, short_name, framework_key, delimited_polygon_ids,
                   output):
     """Find tiles for polygons missing TTC values.
+    NOTE: The code only identifies tiles without TTC (tree_cover) value in the tm.geoparquet file. It does not
+    query TerraMatch API directly.
 
     \b
     Examples:
@@ -305,7 +307,7 @@ def tiles_missing(ctx, geoparquet, tiledb, outermost_eval_epoch_name, short_name
     tiledb = tiledb or gri.cfg.parquet_path
 
     if output is None and short_name is None and framework_key is None:
-        summary = summarize_missing(geoparquet, outermost_eval_epoch_name)
+        summary = summarize_missing(geoparquet, outermost_project_phase_name)
         if not gri.json_mode:
             click.echo(f"Total polygons missing TTC: {summary['total_missing']:,}\n")
             click.echo("By cohort:")
@@ -322,7 +324,7 @@ def tiles_missing(ctx, geoparquet, tiledb, outermost_eval_epoch_name, short_name
     )
 
     tiles_list = generate_missing_tiles(
-        geoparquet, tiledb, outermost_eval_epoch_name=outermost_eval_epoch_name,
+        geoparquet, tiledb, outermost_project_phase_name=outermost_project_phase_name,
         short_name=short_name, framework_key=framework_key, polygon_ids=polygon_ids,
 
     )

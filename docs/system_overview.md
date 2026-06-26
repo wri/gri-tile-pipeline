@@ -68,9 +68,9 @@ and compose through the tiles CSV + `--dest` convention.
 gri-ttc
 ├── doctor               Verify the local environment is ready to run the pipeline.
 ├── resolve              Input → canonical tiles CSV
-├── polygons-missing-ttc Lists polygons missinc ttc for specified eval epoc.
+├── polygons-missing-ttc Lists polygons missinc ttc for specified project phase.
 ├── tiles
-│   ├── missing          Tiles for polygons with null TTC for given eval epoch
+│   ├── missing          Tiles for polygons with null TTC for given project phase
 │   ├── split            Chunk a tiles CSV
 │   └── validate         Schema (+ optional S3 presence) check
 ├── check                Availability of tiles on S3 (binary or --check-type)
