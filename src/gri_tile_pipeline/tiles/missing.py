@@ -8,10 +8,11 @@ tile grid to produce a deduplicated tile list.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Tuple
+from typing import Any
 from uuid import UUID
 
 from gri_shared_library.constants import TreeCoverProjectPhaseYearRange
+# from gri_shared_library.utils import debug_expand_number_parameterized_duckdb_query
 
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 
@@ -48,47 +49,49 @@ def generate_missing_tiles(
         (or partial) result, otherwise a genuine failure is a silently truncated output.
     """
     survey_year_offsets = _get_survey_year_offssets(outermost_project_phase_name)
+    offsets = _distinct_year_offsets(survey_year_offsets)
+    current_year = datetime.today().year
 
-    # Loop through offset years, identifying missing tiles
-    all_years_rows = []
+    # Single geoparquet scan cross-joined against the set of distinct year
+    # offsets, so the evaluation year is the per-row YEAR(plantstart) + o.off.
+    # DISTINCT collapses tiles shared across overlapping year ranges.
+    where_clause, params, param_idx = _construct_query_filters(
+        geoparquet, current_year, offsets, short_name, framework_key, polygon_ids)
+
+    params.append(tiledb)
+    tiledb_param = f"${param_idx}"
+
+    query = f"""
+        WITH polys AS (
+            SELECT geom, YEAR(plantstart) + o.off AS yr
+            FROM read_parquet($1), (SELECT UNNEST($3::INTEGER[]) AS off) o
+            WHERE {where_clause}
+        )
+        SELECT DISTINCT
+            p.yr AS year,
+            t.X AS lon,
+            t.Y AS lat,
+            t.X_tile,
+            t.Y_tile
+        FROM polys p, read_parquet({tiledb_param}) t
+        WHERE ST_Intersects(
+            p.geom,
+            ST_MakeEnvelope(
+                t.X - {HALF_TILE}, t.Y - {HALF_TILE},
+                t.X + {HALF_TILE}, t.Y + {HALF_TILE}
+            )
+        )
+        ORDER BY p.yr, t.X_tile, t.Y_tile
+    """
+
     con = connect_with_spatial()
     try:
-        for offset_year in survey_year_offsets:
-            where_clause, params, param_idx = (
-                _construct_where_clause_for_geoparquet(geoparquet, short_name, framework_key, offset_year, polygon_ids))
-
-            params.append(tiledb)
-            tiledb_param = f"${param_idx}"
-
-            query = f"""
-                WITH polys AS (
-                    SELECT geom, YEAR(plantstart) + $2 AS yr
-                    FROM read_parquet($1)
-                    WHERE {where_clause}
-                )
-                SELECT DISTINCT
-                    p.yr AS year,
-                    t.X AS lon,
-                    t.Y AS lat,
-                    t.X_tile,
-                    t.Y_tile
-                FROM polys p, read_parquet({tiledb_param}) t
-                WHERE ST_Intersects(
-                    p.geom,
-                    ST_MakeEnvelope(
-                        t.X - {HALF_TILE}, t.Y - {HALF_TILE},
-                        t.X + {HALF_TILE}, t.Y + {HALF_TILE}
-                    )
-                )
-                ORDER BY p.yr, t.X_tile, t.Y_tile
-            """
-            # debug_expanded_sql = debug_expand_number_parameterized_duckdb_query(query, params)
-            this_year_rows = con.execute(query, params).fetchall()
-            all_years_rows.extend(this_year_rows)
+        # debug_expanded_sql = debug_expand_number_parameterized_duckdb_query(query, params)
+        all_years_rows = con.execute(query, params).fetchall()
     finally:
         con.close()
 
-    return [
+    results = [
         {
             "year": int(year),
             "lon": round(float(lon), 4),
@@ -98,70 +101,7 @@ def generate_missing_tiles(
         }
         for year, lon, lat, x_tile, y_tile in all_years_rows
     ]
-
-
-def summarize_missing(
-    geoparquet: str,
-    outermost_project_phase_name: str = 'BASELINE',
-) -> dict[str, Any]:
-    """Return a structured summary of polygons missing TTC, by cohort and project.
-
-    Args:
-        geoparquet: geoparquet fileoath
-        outermost_project_phase_name: name of the outermost project phase
-    """
-    import re
-    survey_year_offsets = _get_survey_year_offssets(outermost_project_phase_name)
-
-    subqueries: list[str] = []
-    all_params: list[Any] = []
-
-    for offset_year in survey_year_offsets:
-        where_clause, params, _ = _construct_where_clause_for_geoparquet(
-            geoparquet, None, None, offset_year, None
-        )
-        shift = len(all_params)
-        shifted_where = re.sub(r'\$(\d+)', lambda m: f'${int(m.group(1)) + shift}', where_clause)
-        subqueries.append(
-            f"SELECT poly_uuid, framework_key, short_name "
-            f"FROM read_parquet(${1 + shift}) WHERE {shifted_where}"
-        )
-        all_params.extend(params)
-
-    union_sql = " UNION ".join(subqueries)
-
-    con = connect_with_spatial()
-    try:
-        cohort_rows = con.execute(
-            f"""
-            SELECT framework_key, COUNT(*) as cnt
-            FROM ({union_sql})
-            GROUP BY 1 ORDER BY cnt DESC
-            """,
-            all_params,
-        ).fetchall()
-        project_rows = con.execute(
-            f"""
-            SELECT short_name, framework_key, COUNT(*) as cnt
-            FROM ({union_sql})
-            GROUP BY 1, 2
-            ORDER BY cnt DESC
-            """,
-            all_params,
-        ).fetchall()
-    finally:
-        con.close()
-
-    return {
-        "by_cohort": [
-            {"framework_key": k, "polygons_missing_ttc": c} for k, c in cohort_rows
-        ],
-        "by_project": [
-            {"short_name": s, "framework_key": k, "polygons_missing_ttc": c}
-            for s, k, c in project_rows
-        ],
-        "total_missing": sum(r[1] for r in cohort_rows),
-    }
+    return results
 
 
 def list_polygons_missing_ttc(
@@ -187,28 +127,35 @@ def list_polygons_missing_ttc(
         swallowed: see ``generate_missing_tiles``.
     """
     survey_year_offsets = _get_survey_year_offssets(outermost_project_phase_name)
+    offsets = _distinct_year_offsets(survey_year_offsets)
+    current_year = datetime.today().year
 
-    # Loop through offset years, identifying polygons missing ttc for project phase year
-    all_years_rows = []
+    # Single scan cross-joined against the distinct offsets. DISTINCT removes
+    # (polygon, year) rows duplicated by overlapping year ranges.
+    where_clause, params, _ = _construct_query_filters(
+        geoparquet, current_year, offsets, short_name, framework_key, polygon_ids)
+
+    query = f"""
+        SELECT DISTINCT
+            YEAR(plantstart) + o.off AS eval_year,
+            project_id,
+            short_name AS project_short_name,
+            poly_uuid,
+            plantstart,
+            ST_AsText(geom) AS geometry
+        FROM read_parquet($1), (SELECT UNNEST($3::INTEGER[]) AS off) o
+        WHERE {where_clause}
+        ORDER BY eval_year, poly_uuid
+    """
+
     con = connect_with_spatial()
     try:
-        for offset_year in survey_year_offsets:
-            where_clause, params, param_idx = (
-                _construct_where_clause_for_geoparquet(geoparquet, short_name, framework_key, offset_year, polygon_ids))
-
-            query = f"""
-                    SELECT YEAR(plantstart) + $2 AS eval_year, project_id, short_name as project_short_name,
-                     poly_uuid, plantstart, ST_AsText(geom) as geometry
-                    FROM read_parquet($1)
-                    WHERE {where_clause}
-                    """
-            # debug_expanded_sql = debug_expand_number_parameterized_duckdb_query(query, params)
-            this_year_rows = con.execute(query, params).fetchall()
-            all_years_rows.extend(this_year_rows)
+        # debug_expanded_sql = debug_expand_number_parameterized_duckdb_query(query, params)
+        all_years_rows = con.execute(query, params).fetchall()
     finally:
         con.close()
 
-    return [
+    results = [
         {
             "eval_year": int(eval_year),
             "project_id": project_id,
@@ -220,42 +167,127 @@ def list_polygons_missing_ttc(
         for eval_year, project_id, project_short_name, poly_uuid, plantstart, geometry in all_years_rows
     ]
 
+    return results
 
-def _get_survey_year_offssets(outermost_project_phase_name):
-    epoch_offsets = {
-        TreeCoverProjectPhaseYearRange.BASELINE.name: [TreeCoverProjectPhaseYearRange.BASELINE.value],
-        TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.name: [TreeCoverProjectPhaseYearRange.BASELINE.value, TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.value],
-        TreeCoverProjectPhaseYearRange.ENDLINE.name: [TreeCoverProjectPhaseYearRange.BASELINE.value, TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.value, TreeCoverProjectPhaseYearRange.ENDLINE.value],
+
+def summarize_missing(
+    geoparquet: str,
+    outermost_project_phase_name: str = 'BASELINE',
+) -> dict[str, Any]:
+    """Return a structured summary of polygons missing TTC, by cohort and project.
+
+    Args:
+        geoparquet: geoparquet fileoath
+        outermost_project_phase_name: name of the outermost project phase
+    """
+    survey_year_offsets = _get_survey_year_offssets(outermost_project_phase_name)
+    offsets = _distinct_year_offsets(survey_year_offsets)
+    current_year = datetime.today().year
+
+    where_clause, params, _ = _construct_query_filters(
+        geoparquet, current_year, offsets, None, None, None)
+
+    con = connect_with_spatial()
+    try:
+        # Materialize the distinct set of missing polygons once, then run all
+        # three rollups against the temp table so the geoparquet is scanned a
+        # single time. COUNT(DISTINCT poly_uuid) guards the counts regardless.
+        con.execute(
+            f"""
+            CREATE TEMP TABLE missing_polys AS
+            SELECT DISTINCT poly_uuid, framework_key, short_name
+            FROM read_parquet($1), (SELECT UNNEST($3::INTEGER[]) AS off) o
+            WHERE {where_clause}
+            """,
+            params,
+        )
+        cohort_rows = con.execute(
+            """
+            SELECT framework_key, COUNT(DISTINCT poly_uuid) AS cnt
+            FROM missing_polys
+            GROUP BY 1 ORDER BY cnt DESC
+            """
+        ).fetchall()
+        project_rows = con.execute(
+            """
+            SELECT short_name, framework_key, COUNT(DISTINCT poly_uuid) AS cnt
+            FROM missing_polys
+            GROUP BY 1, 2 ORDER BY cnt DESC
+            """
+        ).fetchall()
+        total_missing = con.execute(
+            "SELECT COUNT(DISTINCT poly_uuid) FROM missing_polys"
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+    results = {
+        "by_cohort": [
+            {"framework_key": k, "polygons_missing_ttc": c} for k, c in cohort_rows
+        ],
+        "by_project": [
+            {"short_name": s, "framework_key": k, "polygons_missing_ttc": c}
+            for s, k, c in project_rows
+        ],
+        "total_missing": total_missing,
     }
 
-    # Get list of offset years based on specified outermost_project_phase_name
+    return results
+
+
+def _get_survey_year_offssets(outermost_project_phase_name):
+    window_offsets = {
+        TreeCoverProjectPhaseYearRange.BASELINE.name: [TreeCoverProjectPhaseYearRange.BASELINE.value],
+        TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.name: [TreeCoverProjectPhaseYearRange.BASELINE.value,
+                                                             TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.value],
+        TreeCoverProjectPhaseYearRange.ENDLINE.name: [TreeCoverProjectPhaseYearRange.BASELINE.value,
+                                                      TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.value,
+                                                      TreeCoverProjectPhaseYearRange.ENDLINE.value],
+    }
+
+    # Get list of offset (start, end) ranges based on specified outermost_project_phase_name
     key = (outermost_project_phase_name or TreeCoverProjectPhaseYearRange.BASELINE.name).upper()
-    if key not in epoch_offsets:
+    if key not in window_offsets:
         raise ValueError(f"Unknown project phase name: {outermost_project_phase_name}")
-    survey_year_offsets = epoch_offsets[key]
+    survey_year_offsets = window_offsets[key]
 
     return survey_year_offsets
 
 
-def _construct_where_clause_for_geoparquet(
+def _distinct_year_offsets(survey_year_offsets) -> list[int]:
+    """Flatten a list of inclusive (start, end) offset ranges into the sorted set
+    of distinct individual year offsets. Overlapping ranges collapse here, so the
+    downstream cross-join never produces duplicate (polygon, year) rows."""
+    return sorted({off for (start, end) in survey_year_offsets for off in range(start, end + 1)})
+
+
+def _construct_query_filters(
         geoparquet: str,
-        short_name: str,
-        framework_key: str,
-        offset_year_range: Tuple[int, int],
+        current_year: int,
+        offsets: list[int],
+        short_name: str | None,
+        framework_key: str | None,
         polygon_ids: list[UUID] | None = None):
     """
-    Constructs WHERE clause for querying geoparquet file with qualification for TTC, plantstart, and optional filters.
-    """
-    offset_year_start = offset_year_range[0]
-    offset_year_end = offset_year_range[1]
+    Build the shared WHERE clause and positional params for the geoparquet scan.
 
-    current_year = datetime.today().year
-    conditions = ["(ttc IS NULL OR cardinality(ttc) = 0 OR "
-                  "len(list_filter(map_keys(ttc), k -> k BETWEEN YEAR(plantstart) + $2 AND YEAR(plantstart) + $3)) = 0)",
-                  f"YEAR(plantstart) + $3 < $4",
+    The scan is cross-joined against the distinct year offsets, so the evaluation
+    year is the per-row ``YEAR(plantstart) + o.off`` (``o.off`` comes from
+    ``UNNEST($3::INTEGER[])`` in the caller's FROM clause). Fixed param layout:
+
+        $1   = geoparquet path
+        $2   = current_year
+        $3   = offsets (INTEGER[])   -- consumed by UNNEST in the FROM clause
+        $4.. = optional short_name / framework_key / polygon_ids filters
+
+    Returns (where_clause, params, param_idx) where ``param_idx`` is the next free
+    positional index, for callers that append further params (e.g. tiledb).
+    """
+    conditions = ["(ttc IS NULL OR cardinality(ttc) = 0 OR NOT list_contains(map_keys(ttc), YEAR(plantstart) + o.off))",
+                  "YEAR(plantstart) + o.off < $2",
                   "ST_IsValid(geom)"]
-    params: list[Any] = [geoparquet, offset_year_start, offset_year_end, current_year]
-    param_idx = 5
+    params: list[Any] = [geoparquet, current_year, offsets]
+    param_idx = 4
 
     if short_name is not None:
         conditions.append(f"short_name = ${param_idx}")

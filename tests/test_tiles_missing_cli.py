@@ -1,16 +1,16 @@
-"""Tests for the ``tiles missing`` CLI command and its project_phase handling.
+"""Tests for the ``gri-ttc tiles missing`` Click command (``tiles_missing``).
 
-Covers:
-  - TreeCoverProjectPhaseYearRange (start, end) ranges, contains(), from_score()
-  - CLI routes project_phase correctly to generate_missing_tiles()
-  - All three epoch names (BASELINE / EARLY_INSIGHTS / ENDLINE) map to the right offsets
-  - Default epoch is BASELINE
-  - Invalid epoch name raises ValueError inside generate_missing_tiles
-  - NO_WORK exit path when generate_missing_tiles returns an empty list
-  - Summary-only path (no --short-name / --framework-key / --output)
-  - Output written when --output is supplied
-  - framework_key filter forwarded correctly
-  - Combined project_phase + framework_key forwarding
+The command imports its collaborators *inside the function body*, e.g.::
+
+    from gri_tile_pipeline.tiles.missing import generate_missing_tiles, summarize_missing
+
+so the patch targets below are the **source** modules where those names are
+defined, not the module that defines the command. That is what makes the
+``unittest.mock.patch`` targets work regardless of how the command imports them.
+
+NOTE - adjust these two import lines to your project's real layout:
+  * ``tiles_missing`` / ``ExitCode`` are imported from the module that defines them.
+  * The patch-target strings are the modules the command imports *from*.
 """
 
 from __future__ import annotations
@@ -20,334 +20,213 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from gri_tile_pipeline.cli import gri_ttc
-from gri_shared_library.constants import TreeCoverProjectPhaseYearRange
-from gri_tile_pipeline.tiles.missing import generate_missing_tiles
+# --- adjust to the module that defines the command + ExitCode -----------------
+from gri_tile_pipeline.cli import tiles_missing, ExitCode
+
+# --- patch targets: the SOURCE modules the command imports from ---------------
+P_SUMMARIZE = "gri_tile_pipeline.tiles.missing.summarize_missing"
+P_GENERATE = "gri_tile_pipeline.tiles.missing.generate_missing_tiles"
+P_WRITE_CSV = "gri_tile_pipeline.tiles.csv_io.write_tiles_csv"
+P_EMIT_JSON = "gri_tile_pipeline.cli_context.emit_json"
+P_GET_CTX = "gri_tile_pipeline.cli_context.get"
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-FAKE_TILE = {"year": 2022, "lon": 10.0, "lat": 5.0, "X_tile": 100, "Y_tile": 50}
-
-# Patch targets — use the *defining* module (lazy imports inside the CLI
-# function bind to the original location, not via gri_tile_pipeline.cli).
-_GEN_MISSING = "gri_tile_pipeline.tiles.missing.generate_missing_tiles"
-_SUMMARIZE   = "gri_tile_pipeline.tiles.missing.summarize_missing"
-_WRITE_CSV   = "gri_tile_pipeline.tiles.csv_io.write_tiles_csv"
-_LOAD_CFG    = "gri_tile_pipeline.config.load_config"
-_SETUP_LOG   = "gri_tile_pipeline.logging.setup_logging"
-_BIND_CTX    = "gri_tile_pipeline.logging.bind_run_context"
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture()
+@pytest.fixture
 def runner():
     return CliRunner()
 
 
-@pytest.fixture(autouse=True)
-def _stub_infra():
-    """Suppress logging setup and config file I/O for every test in this file."""
-    from gri_tile_pipeline.config import PipelineConfig
-    stub_cfg = PipelineConfig()  # all defaults; parquet_path='data/tiledb.parquet'
-
-    with (
-        patch(_LOAD_CFG, return_value=stub_cfg),
-        patch(_SETUP_LOG),
-        patch(_BIND_CTX),
-        patch("gri_tile_pipeline.cli_context.resolve_pipeline_version", return_value="test"),
-        patch("gri_tile_pipeline.cli_context.resolve_git_sha", return_value="abc123"),
-    ):
-        yield
+def _make_gri(*, json_mode=False, parquet_path="config/tiles.parquet"):
+    """Fake gri context object returned by ``get_ctx(ctx)``."""
+    gri = MagicMock()
+    gri.json_mode = json_mode
+    gri.cfg.parquet_path = parquet_path
+    return gri
 
 
-def invoke_missing(runner, extra_args: list[str]):
-    """Run ``gri-ttc tiles missing`` with the given extra arguments."""
-    return runner.invoke(gri_ttc, ["tiles", "missing", *extra_args],
-                         catch_exceptions=False)
+SUMMARY_FIXTURE = {
+    "total_missing": 1234,
+    "by_cohort": [
+        {"framework_key": "hbf", "polygons_missing_ttc": 800},
+        {"framework_key": None, "polygons_missing_ttc": 434},
+    ],
+    "by_project": [
+        {"short_name": "RWA_23_AEE", "framework_key": "hbf", "polygons_missing_ttc": 800},
+    ],
+}
+
+TILES_FIXTURE = [
+    {"year": 2022, "lon": 1.0, "lat": 2.0, "X_tile": 10, "Y_tile": 20},
+    {"year": 2022, "lon": 1.1, "lat": 2.1, "X_tile": 11, "Y_tile": 21},
+    {"year": 2023, "lon": 1.2, "lat": 2.2, "X_tile": 12, "Y_tile": 22},
+]
 
 
-# ---------------------------------------------------------------------------
-# Unit tests: TreeCoverProjectPhaseYearRange enum
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
+# Summary branch: no --output, no --short-name, no --framework-key
+# --------------------------------------------------------------------------- #
+def test_summary_branch_calls_summarize_and_prints(runner):
+    with patch(P_GET_CTX, return_value=_make_gri(json_mode=False)), \
+         patch(P_SUMMARIZE, return_value=SUMMARY_FIXTURE) as m_sum, \
+         patch(P_GENERATE) as m_gen, \
+         patch(P_EMIT_JSON) as m_emit:
+        result = runner.invoke(tiles_missing, [])
 
-class TestTreeCoverProjectPhaseYearRange:
-    """Each member exposes a (start, end) year range plus contains()/from_score()."""
-
-    # -- (start, end) values -------------------------------------------------
-
-    def test_baseline_range(self):
-        assert TreeCoverProjectPhaseYearRange.BASELINE.start == -2
-        assert TreeCoverProjectPhaseYearRange.BASELINE.end == -1
-
-    def test_early_insights_range(self):
-        assert TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.start == 0
-        assert TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.end == 2
-
-    def test_endline_range(self):
-        assert TreeCoverProjectPhaseYearRange.ENDLINE.start == 3
-        assert TreeCoverProjectPhaseYearRange.ENDLINE.end == 6
-
-    def test_ranges_are_contiguous_and_ordered(self):
-        members = list(TreeCoverProjectPhaseYearRange)
-        for prev, nxt in zip(members, members[1:]):
-            assert prev.end + 1 == nxt.start
-
-    # -- contains() ----------------------------------------------------------
-
-    def test_contains_includes_both_endpoints(self):
-        phase = TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS
-        assert phase.contains(phase.start)
-        assert phase.contains(phase.end)
-
-    def test_contains_inside_range(self):
-        assert TreeCoverProjectPhaseYearRange.ENDLINE.contains(4)
-
-    def test_contains_rejects_out_of_range(self):
-        assert not TreeCoverProjectPhaseYearRange.BASELINE.contains(0)
-        assert not TreeCoverProjectPhaseYearRange.ENDLINE.contains(7)
-
-    # -- from_score() --------------------------------------------------------
-
-    @pytest.mark.parametrize(
-        "score, expected",
-        [
-            (-2, TreeCoverProjectPhaseYearRange.BASELINE),
-            (-1, TreeCoverProjectPhaseYearRange.BASELINE),
-            (0, TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS),
-            (2, TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS),
-            (3, TreeCoverProjectPhaseYearRange.ENDLINE),
-            (6, TreeCoverProjectPhaseYearRange.ENDLINE),
-        ],
-    )
-    def test_from_score_maps_to_correct_phase(self, score, expected):
-        assert TreeCoverProjectPhaseYearRange.from_score(score) is expected
-
-    def test_from_score_uses_end_attribute_for_offsets(self):
-        """The CLI/SQL offset ($2) is the phase's ``end`` value."""
-        assert TreeCoverProjectPhaseYearRange.from_score(-1).end == -1
-        assert TreeCoverProjectPhaseYearRange.from_score(2).end == 2
-        assert TreeCoverProjectPhaseYearRange.from_score(6).end == 6
-
-    @pytest.mark.parametrize("score", [-3, 7, 100])
-    def test_from_score_raises_when_no_phase_matches(self, score):
-        with pytest.raises(StopIteration):
-            TreeCoverProjectPhaseYearRange.from_score(score)
+    assert result.exit_code == 0, result.output
+    # summarize called with positional (geoparquet, phase); generate NOT called
+    m_sum.assert_called_once()
+    assert m_sum.call_args.args[1] == "BASELINE"
+    m_gen.assert_not_called()
+    # human-readable output rendered
+    assert "Total polygons missing TTC: 1,234" in result.output
+    assert "hbf" in result.output
+    assert "(null)" in result.output  # None framework_key falls back to '(null)'
+    # emit_json got the summary payload
+    payload = m_emit.call_args.args[1]
+    assert payload["command"] == "tiles.missing"
+    assert payload["status"] == "summary"
+    assert payload["total_missing"] == 1234
 
 
-# ---------------------------------------------------------------------------
-# Unit tests: generate_missing_tiles — project_phase → survey_year_offset mapping
-# ---------------------------------------------------------------------------
+def test_summary_branch_json_mode_suppresses_echo(runner):
+    with patch(P_GET_CTX, return_value=_make_gri(json_mode=True)), \
+         patch(P_SUMMARIZE, return_value=SUMMARY_FIXTURE), \
+         patch(P_EMIT_JSON) as m_emit:
+        result = runner.invoke(tiles_missing, [])
 
-class TestOutermostTreeCoverProjectPhaseYearRangeOffsetMapping:
-    """Verify each epoch name drives the correct $2 parameter in the SQL query."""
-
-    def _captured_offset(self, epoch) -> int:
-        """Return the survey_year_offset ($2) that the DuckDB execute() receives."""
-        mock_con = MagicMock()
-        mock_con.execute.return_value.fetchall.return_value = []
-
-        with patch("gri_tile_pipeline.tiles.missing.connect_with_spatial",
-                   return_value=mock_con):
-            generate_missing_tiles(
-                geoparquet="fake.parquet",
-                tiledb="fake_tiledb.parquet",
-                outermost_project_phase_name=epoch,
-            )
-
-        # params = second positional arg to con.execute(query, params)
-        params: list = mock_con.execute.call_args[0][1]
-        return params[2]  # index 1 == $2 == survey_year_offset
-
-    def test_baseline_offset_is_minus_one(self):
-        assert self._captured_offset("BASELINE") == TreeCoverProjectPhaseYearRange.BASELINE.end  # -1
-
-    def test_midway_offset_is_two(self):
-        assert self._captured_offset("EARLY_INSIGHTS") == TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.end      # 2
-
-    def test_endline_offset_is_six(self):
-        assert self._captured_offset("ENDLINE") == TreeCoverProjectPhaseYearRange.ENDLINE.end    # 6
-
-    def test_lowercase_baseline(self):
-        assert self._captured_offset("baseline") == TreeCoverProjectPhaseYearRange.BASELINE.end
-
-    def test_lowercase_midway(self):
-        assert self._captured_offset("early_insights") == TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.end
-
-    def test_none_defaults_to_baseline(self):
-        """project_phase=None is treated as BASELINE per the implementation guard."""
-        assert self._captured_offset(None) == TreeCoverProjectPhaseYearRange.BASELINE.end
-
-    def test_invalid_outermost_epoch_raises_value_error(self):
-        mock_con = MagicMock()
-        with patch("gri_tile_pipeline.tiles.missing.connect_with_spatial",
-                   return_value=mock_con):
-            with pytest.raises(ValueError, match="Unknown project phase"):
-                generate_missing_tiles(
-                    geoparquet="fake.parquet",
-                    tiledb="fake_tiledb.parquet",
-                    outermost_project_phase_name="QUARTERLY",
-                )
+    assert result.exit_code == 0, result.output
+    # json_mode True => no human echo
+    assert "Total polygons missing TTC" not in result.output
+    m_emit.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# CLI tests: ``gri-ttc tiles missing``
-# ---------------------------------------------------------------------------
+def test_summary_uses_phase_option(runner):
+    with patch(P_GET_CTX, return_value=_make_gri()), \
+         patch(P_SUMMARIZE, return_value=SUMMARY_FIXTURE) as m_sum, \
+         patch(P_EMIT_JSON):
+        result = runner.invoke(
+            tiles_missing, ["--outermost_project_phase_name", "ENDLINE"]
+        )
 
-class TestTilesMissingCLI:
+    assert result.exit_code == 0, result.output
+    assert m_sum.call_args.args[1] == "ENDLINE"
 
-    # -- project_phase forwarding -----------------------------------------------
 
-    def test_default_outermost_project_phase_name_is_baseline(self, runner):
-        with (
-            patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
-            patch(_WRITE_CSV),
-        ):
-            result = invoke_missing(runner, ["--short-name", "TEST_23_XXX"])
+# --------------------------------------------------------------------------- #
+# Generate branch: triggered by --output OR a filter option
+# --------------------------------------------------------------------------- #
+def test_generate_with_output_writes_csv_and_emits_counts(runner):
+    gri = _make_gri(parquet_path="cfg/default.parquet")
+    with patch(P_GET_CTX, return_value=gri), \
+         patch(P_GENERATE, return_value=TILES_FIXTURE) as m_gen, \
+         patch(P_WRITE_CSV) as m_write, \
+         patch(P_SUMMARIZE) as m_sum, \
+         patch(P_EMIT_JSON) as m_emit:
+        result = runner.invoke(tiles_missing, ["-o", "out.csv"])
 
-        assert result.exit_code == 0, result.output
-        _args, kwargs = mock_gen.call_args
-        assert kwargs.get("outermost_project_phase_name", "BASELINE") == "BASELINE"
+    assert result.exit_code == 0, result.output
+    m_sum.assert_not_called()
+    m_gen.assert_called_once()
+    # tiledb defaulted to config parquet_path
+    assert m_gen.call_args.args[1] == "cfg/default.parquet"
+    # csv written with the produced tiles
+    m_write.assert_called_once_with("out.csv", TILES_FIXTURE)
+    # by_year counts aggregated correctly
+    payload = m_emit.call_args.args[1]
+    assert payload["status"] == "ok"
+    assert payload["n_tiles"] == 3
+    assert payload["output"] == "out.csv"
+    assert payload["by_year"] == {2022: 2, 2023: 1}
 
-    def test_outermost_project_phase_name_baseline_forwarded(self, runner):
-        with (
-            patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
-            patch(_WRITE_CSV),
-        ):
-            result = invoke_missing(runner,
-                                    ["--short-name", "TEST_23_XXX",
-                                     "--outermost_project_phase_name", "BASELINE"])
 
-        assert result.exit_code == 0, result.output
-        _args, kwargs = mock_gen.call_args
-        assert kwargs["outermost_project_phase_name"] == "BASELINE"
+def test_filter_option_triggers_generate_without_output(runner):
+    """--short-name alone (no -o) must still hit the generate branch, not summary."""
+    with patch(P_GET_CTX, return_value=_make_gri()), \
+         patch(P_GENERATE, return_value=TILES_FIXTURE) as m_gen, \
+         patch(P_WRITE_CSV) as m_write, \
+         patch(P_SUMMARIZE) as m_sum, \
+         patch(P_EMIT_JSON) as m_emit:
+        result = runner.invoke(tiles_missing, ["--short-name", "RWA_23_AEE"])
 
-    def test_outermost_project_phase_name_midway_forwarded(self, runner):
-        with (
-            patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
-            patch(_WRITE_CSV),
-        ):
-            result = invoke_missing(runner,
-                                    ["--short-name", "TEST_23_XXX",
-                                     "--outermost_project_phase_name", "EARLY_INSIGHTS"])
+    assert result.exit_code == 0, result.output
+    m_sum.assert_not_called()
+    m_gen.assert_called_once()
+    assert m_gen.call_args.kwargs["short_name"] == "RWA_23_AEE"
+    # no --output => csv not written, but counts still emitted
+    m_write.assert_not_called()
+    assert m_emit.call_args.args[1]["status"] == "ok"
 
-        assert result.exit_code == 0, result.output
-        _args, kwargs = mock_gen.call_args
-        assert kwargs["outermost_project_phase_name"] == "EARLY_INSIGHTS"
 
-    def test_outermost_project_phase_name_endline_forwarded(self, runner):
-        with (
-            patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
-            patch(_WRITE_CSV),
-        ):
-            result = invoke_missing(runner,
-                                    ["--short-name", "TEST_23_XXX",
-                                     "--outermost_project_phase_name", "ENDLINE"])
+def test_explicit_tiledb_overrides_config(runner):
+    with patch(P_GET_CTX, return_value=_make_gri(parquet_path="cfg/default.parquet")), \
+         patch(P_GENERATE, return_value=TILES_FIXTURE) as m_gen, \
+         patch(P_WRITE_CSV), patch(P_EMIT_JSON):
+        result = runner.invoke(
+            tiles_missing, ["--tiledb", "explicit/tiles.parquet", "-o", "out.csv"]
+        )
 
-        assert result.exit_code == 0, result.output
-        _args, kwargs = mock_gen.call_args
-        assert kwargs["outermost_project_phase_name"] == "ENDLINE"
+    assert result.exit_code == 0, result.output
+    assert m_gen.call_args.args[1] == "explicit/tiles.parquet"
 
-    # -- no-work exit --------------------------------------------------------
 
-    def test_no_work_exit_code_when_no_tiles(self, runner):
-        with (
-            patch(_GEN_MISSING, return_value=[]),
-            patch(_WRITE_CSV) as mock_write,
-        ):
-            result = invoke_missing(runner, ["--short-name", "EMPTY_PROJECT"])
+def test_framework_key_passed_through(runner):
+    with patch(P_GET_CTX, return_value=_make_gri()), \
+         patch(P_GENERATE, return_value=TILES_FIXTURE) as m_gen, \
+         patch(P_WRITE_CSV), patch(P_EMIT_JSON):
+        result = runner.invoke(
+            tiles_missing, ["--framework-key", "hbf", "-o", "out.csv"]
+        )
 
-        assert result.exit_code == 6  # ExitCode.NO_WORK
-        mock_write.assert_not_called()
+    assert result.exit_code == 0, result.output
+    assert m_gen.call_args.kwargs["framework_key"] == "hbf"
 
-    # -- output file ---------------------------------------------------------
 
-    def test_output_written_when_tiles_found(self, runner, tmp_path):
-        out = str(tmp_path / "missing.csv")
-        with (
-            patch(_GEN_MISSING, return_value=[FAKE_TILE]),
-            patch(_WRITE_CSV) as mock_write,
-        ):
-            result = invoke_missing(runner,
-                                    ["--short-name", "TEST_23_XXX", "-o", out])
+# --------------------------------------------------------------------------- #
+# delimited_polygon_ids parsing
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("a,b,c", ["a", "b", "c"]),
+        (" a , b , c ", ["a", "b", "c"]),          # whitespace stripped
+        ("'a','b'", ["a", "b"]),                    # surrounding single quotes stripped
+        ("'a', 'b' ", ["a", "b"]),                  # mixed spacing + quotes
+    ],
+)
+def test_delimited_polygon_ids_parsing(runner, raw, expected):
+    with patch(P_GET_CTX, return_value=_make_gri()), \
+         patch(P_GENERATE, return_value=TILES_FIXTURE) as m_gen, \
+         patch(P_WRITE_CSV), patch(P_EMIT_JSON):
+        result = runner.invoke(
+            tiles_missing, ["--delimited_polygon_ids", raw, "-o", "out.csv"]
+        )
 
-        assert result.exit_code == 0, result.output
-        mock_write.assert_called_once_with(out, [FAKE_TILE])
+    assert result.exit_code == 0, result.output
+    assert m_gen.call_args.kwargs["polygon_ids"] == expected
 
-    def test_no_output_flag_skips_csv_write(self, runner):
-        with (
-            patch(_GEN_MISSING, return_value=[FAKE_TILE]),
-            patch(_WRITE_CSV) as mock_write,
-        ):
-            result = invoke_missing(runner, ["--short-name", "TEST_23_XXX"])
 
-        assert result.exit_code == 0, result.output
-        mock_write.assert_not_called()
+def test_polygon_ids_none_when_option_absent(runner):
+    with patch(P_GET_CTX, return_value=_make_gri()), \
+         patch(P_GENERATE, return_value=TILES_FIXTURE) as m_gen, \
+         patch(P_WRITE_CSV), patch(P_EMIT_JSON):
+        result = runner.invoke(tiles_missing, ["-o", "out.csv"])
 
-    # -- summary mode --------------------------------------------------------
+    assert result.exit_code == 0, result.output
+    assert m_gen.call_args.kwargs["polygon_ids"] is None
 
-    def test_summary_mode_when_no_filters_or_output(self, runner):
-        """No --short-name / --framework-key / --output → calls summarize_missing."""
-        summary_payload = {
-            "total_missing": 42,
-            "by_cohort": [{"framework_key": "hbf", "polygons_missing_ttc": 42}],
-            "by_project": [],
-        }
-        with (
-            patch(_SUMMARIZE, return_value=summary_payload) as mock_sum,
-            patch(_GEN_MISSING) as mock_gen,
-        ):
-            result = invoke_missing(runner, [])
 
-        assert result.exit_code == 0, result.output
-        mock_sum.assert_called_once()
-        mock_gen.assert_not_called()
-        assert "42" in result.output
+# --------------------------------------------------------------------------- #
+# No-work branch: generate returns empty
+# --------------------------------------------------------------------------- #
+def test_no_work_exits_with_no_work_code(runner):
+    with patch(P_GET_CTX, return_value=_make_gri()), \
+         patch(P_GENERATE, return_value=[]) as m_gen, \
+         patch(P_WRITE_CSV) as m_write, \
+         patch(P_EMIT_JSON) as m_emit:
+        result = runner.invoke(tiles_missing, ["-o", "out.csv"])
 
-    # -- filter forwarding ---------------------------------------------------
-
-    def test_framework_key_forwarded_to_generate(self, runner):
-        with (
-            patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
-            patch(_WRITE_CSV),
-        ):
-            result = invoke_missing(runner, ["--framework-key", "hbf"])
-
-        assert result.exit_code == 0, result.output
-        _args, kwargs = mock_gen.call_args
-        assert kwargs["framework_key"] == "hbf"
-
-    # -- combined project_phase + framework_key ---------------------------------
-
-    def test_midway_with_framework_key(self, runner):
-        with (
-            patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
-            patch(_WRITE_CSV),
-        ):
-            result = invoke_missing(runner,
-                                    ["--framework-key", "hbf",
-                                     "--outermost_project_phase_name", "EARLY_INSIGHTS"])
-
-        assert result.exit_code == 0, result.output
-        _args, kwargs = mock_gen.call_args
-        assert kwargs["outermost_project_phase_name"] == "EARLY_INSIGHTS"
-        assert kwargs["framework_key"] == "hbf"
-
-    def test_endline_with_short_name(self, runner):
-        with (
-            patch(_GEN_MISSING, return_value=[FAKE_TILE]) as mock_gen,
-            patch(_WRITE_CSV),
-        ):
-            result = invoke_missing(runner,
-                                    ["--short-name", "RWA_23_AEE",
-                                     "--outermost_project_phase_name", "ENDLINE"])
-
-        assert result.exit_code == 0, result.output
-        _args, kwargs = mock_gen.call_args
-        assert kwargs["outermost_project_phase_name"] == "ENDLINE"
-        assert kwargs["short_name"] == "RWA_23_AEE"
+    assert result.exit_code == ExitCode.NO_WORK
+    m_write.assert_not_called()
+    payload = m_emit.call_args.args[1]
+    assert payload["status"] == "no_work"
+    assert payload["n_tiles"] == 0
