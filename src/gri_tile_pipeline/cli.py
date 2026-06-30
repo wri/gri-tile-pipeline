@@ -211,7 +211,7 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
 @click.option("--geoparquet", default="temp/tm.geoparquet", show_default=True,
               help="Path to TerraMatch geoparquet.")
 @click.option('--outermost_project_phase_name', default='BASELINE',
-              help="Eval-epoch name for filtering polygons [BASELINE, EARLY_INSIGHTS, ENDLINE")
+              help="Project-phase name for filtering polygons [EXT_BASELINE, BASELINE, EARLY_INSIGHT, ENDLINE")
 @click.option("--short-name", default=None, help="Filter by project short_name.")
 @click.option("--framework-key", default=None, help="Filter by cohort framework_key.")
 @click.option('--delimited_polygon_ids', default=None, hidden=True,
@@ -278,7 +278,7 @@ def tiles():
 @click.option("--tiledb", default=None,
               help="Path to tiledb.parquet (defaults to config pipeline.parquet_path).")
 @click.option('--outermost_project_phase_name', default='BASELINE',
-              help="Eval-epoch name for filtering polygons [BASELINE, EARLY_INSIGHTS, ENDLINE")
+              help="Project-phase name for filtering polygons [EXT_BASELINE, BASELINE, EARLY_INSIGHT, ENDLINE")
 @click.option("--short-name", default=None, help="Filter by project short_name.")
 @click.option("--framework-key", default=None, help="Filter by cohort framework_key.")
 @click.option('--delimited_polygon_ids', default=None, hidden=True,

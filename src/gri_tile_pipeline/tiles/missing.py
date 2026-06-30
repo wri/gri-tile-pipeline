@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID
 
 from gri_shared_library.constants import TreeCoverProjectPhaseYearRange
-# from gri_shared_library.utils import debug_expand_number_parameterized_duckdb_query
+from gri_shared_library.productivity_tools import debug_expand_number_parameterized_duckdb_query
 
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 
@@ -238,10 +238,10 @@ def summarize_missing(
 def _get_survey_year_offssets(outermost_project_phase_name):
     window_offsets = {
         TreeCoverProjectPhaseYearRange.BASELINE.name: [TreeCoverProjectPhaseYearRange.BASELINE.value],
-        TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.name: [TreeCoverProjectPhaseYearRange.BASELINE.value,
-                                                             TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.value],
+        TreeCoverProjectPhaseYearRange.EARLY_INSIGHT.name: [TreeCoverProjectPhaseYearRange.BASELINE.value,
+                                                             TreeCoverProjectPhaseYearRange.EARLY_INSIGHT.value],
         TreeCoverProjectPhaseYearRange.ENDLINE.name: [TreeCoverProjectPhaseYearRange.BASELINE.value,
-                                                      TreeCoverProjectPhaseYearRange.EARLY_INSIGHTS.value,
+                                                      TreeCoverProjectPhaseYearRange.EARLY_INSIGHT.value,
                                                       TreeCoverProjectPhaseYearRange.ENDLINE.value],
     }
 

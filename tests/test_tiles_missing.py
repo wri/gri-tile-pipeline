@@ -3,12 +3,13 @@ import pytest
 import tempfile
 import pandas as pd
 from click.testing import CliRunner
+from gri_shared_library.constants import TERRAMATCH_GEOPARQUET_FILEPATH, TTC_TILEDB_FILEPATH
 from gri_tile_pipeline.cli import gri_ttc  # the module exposing the group
 from tests.constants import REPO_ROOT
 #
-GEOPARQUET = os.path.join(REPO_ROOT, "temp/tm.geoparquet")
+GEOPARQUET = TERRAMATCH_GEOPARQUET_FILEPATH
+tiledb_file = TTC_TILEDB_FILEPATH
 config_file = os.path.join(REPO_ROOT, "config.yaml")
-tiledb_file = os.path.join(REPO_ROOT, "data", "tiledb.parquet")
 
 def test_tiles_missing_with_baseline():
     outermost_project_phase_name = "BASELINE"
@@ -40,8 +41,8 @@ def test_tiles_missing_with_baseline():
         assert tiles['Year'][1] == 2021
 
 
-def test_tiles_missing_with_early_insights():
-    outermost_project_phase_name = "EARLY_INSIGHTS"
+def test_tiles_missing_with_early_insight():
+    outermost_project_phase_name = "EARLY_INSIGHT"
     project_short_name = 'TEST_01_GRI'; delim_ids = '22560785-182b-4c06-b5a5-f355eaf4f907'
 
     runner = CliRunner()
