@@ -36,9 +36,8 @@ def test_tiles_missing_with_baseline():
         assert result.exit_code == 0
         assert os.path.isfile(temp_csv_file)
         tiles = pd.read_csv(filepath_or_buffer=temp_csv_file)
-        assert len(tiles) == 2
-        assert tiles['Year'][0] == 2020
-        assert tiles['Year'][1] == 2021
+        assert len(tiles) == 1
+        assert tiles['Year'][0] == 2021
 
 
 def test_tiles_missing_with_early_insight():
@@ -66,9 +65,9 @@ def test_tiles_missing_with_early_insight():
         assert result.exit_code == 0
         assert os.path.isfile(temp_csv_file)
         tiles = pd.read_csv(filepath_or_buffer=temp_csv_file)
-        assert len(tiles) == 5
-        assert tiles['Year'][0] == 2020
-        assert tiles['Year'][1] == 2021
+        assert len(tiles) == 2
+        assert tiles['Year'][0] == 2021
+        assert tiles['Year'][1] == 2024
 
 
 def test_tiles_missing_with_early_endline():
@@ -97,6 +96,6 @@ def test_tiles_missing_with_early_endline():
         assert os.path.isfile(temp_csv_file)
         tiles = pd.read_csv(filepath_or_buffer=temp_csv_file)
         # Note: Execution in year 2026 will yield 6 rows, whereas later years will yield a greater number of rows
-        assert len(tiles) >= 6
-        assert tiles['Year'][0] == 2020
-        assert tiles['Year'][1] == 2021
+        assert len(tiles) >= 2
+        assert tiles['Year'][0] == 2021
+        assert tiles['Year'][1] == 2024
