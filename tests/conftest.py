@@ -87,23 +87,25 @@ def _is_controller(config):
 
 
 def _setup_test_data():
-    # pre-execution cleanup
-    remove_file(TTC_TILEDB_FILEPATH)
-    remove_file(TERRAMATCH_GEOPARQUET_FILEPATH)
-    # Prepare test projects
-    download_ttc_test_data()
-    thin_tm_geoparquet_to_test_projects()
-    clear_ttc_for_test_projects()
-    assert os.path.exists(TTC_TILEDB_FILEPATH)
-    assert os.path.exists(TERRAMATCH_GEOPARQUET_FILEPATH)
+    if os.getenv("AWS_PROFILE"):
+        # pre-execution cleanup
+        remove_file(TTC_TILEDB_FILEPATH)
+        remove_file(TERRAMATCH_GEOPARQUET_FILEPATH)
+        # Prepare test projects
+        download_ttc_test_data()
+        thin_tm_geoparquet_to_test_projects()
+        clear_ttc_for_test_projects()
+        assert os.path.exists(TTC_TILEDB_FILEPATH)
+        assert os.path.exists(TERRAMATCH_GEOPARQUET_FILEPATH)
 
 
 def _teardown_test_data():
-    # post-execution cleanup
-    remove_file(TTC_TILEDB_FILEPATH)
-    remove_file(TERRAMATCH_GEOPARQUET_FILEPATH)
-    assert not os.path.exists(TTC_TILEDB_FILEPATH)
-    assert not os.path.exists(TERRAMATCH_GEOPARQUET_FILEPATH)
+    if os.getenv("AWS_PROFILE"):
+        # post-execution cleanup
+        remove_file(TTC_TILEDB_FILEPATH)
+        remove_file(TERRAMATCH_GEOPARQUET_FILEPATH)
+        assert not os.path.exists(TTC_TILEDB_FILEPATH)
+        assert not os.path.exists(TERRAMATCH_GEOPARQUET_FILEPATH)
 
 
 def pytest_configure(config):
