@@ -28,12 +28,28 @@ def make_s3_store(bucket: str, region: str, profile: str | None = None):
 def from_dest(dest: str, *, region: str = "us-east-1", profile: str | None = None):
     """Build an obstore Store from an ``s3://`` URI or local path.
 
-    Uses :func:`make_s3_store` for S3 to inherit AWS credential chain
-    (profiles, env vars, SSO, etc.).
+    Uses boto3's credential chain for S3 (profiles, env vars, SSO, etc.) via
+    ``Boto3CredentialProvider``, since obstore doesn't read ``AWS_PROFILE``
+    natively.
+
+    ``dest`` may include a path beyond the bucket (e.g.
+    ``s3://bucket/sentinel/PROJECT``) — the whole URI is passed to
+    ``S3Store.from_url`` so the returned store is scoped to that prefix and
+    a subsequent ``obs.get(store, "2024/tiles/...")`` resolves under it.
+    Previously this only kept the bucket name (``.split("/")[0]``) and
+    silently discarded everything else, so callers using a project-scoped
+    ``dest`` (e.g. ``sentinel_flow``'s ``sentinel/{project_short_name}``)
+    would read/write at the bucket root instead — collapsing distinct
+    projects onto the same global tile keyspace.
     """
     if dest.startswith("s3://"):
-        bucket = dest.replace("s3://", "").split("/")[0]
-        return make_s3_store(bucket, region=region, profile=profile)
+        import boto3
+        from obstore.auth.boto3 import Boto3CredentialProvider
+        from obstore.store import S3Store
+
+        session = boto3.Session(profile_name=profile)
+        credential_provider = Boto3CredentialProvider(session)
+        return S3Store.from_url(dest, region=region, credential_provider=credential_provider)
     os.makedirs(dest, exist_ok=True)
     return LocalStore(prefix=dest)
 
