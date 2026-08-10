@@ -1,12 +1,8 @@
 pipeline:
   parquet_path: data/tiledb.parquet
 
-lithops:
-  euc1_config: .lithops/config.euc1.yaml
-  usw2_config: .lithops/config.usw2.yaml
-  s1_usw2_config: .lithops/config.s1_usw2.yaml
-  # predict_config intentionally omitted. Set LITHOPS_ENV (e.g. datalab-test)
-  # to resolve .lithops/<env>/config.predict.yaml, or override explicitly here.
+# lithops config keys intentionally omitted. Set LITHOPS_ENV (e.g. land-research)
+# to resolve .lithops/<env>/config.*.yaml for all four, or override explicitly here.
 
 download:
   runtime: ttc-loaders-dev

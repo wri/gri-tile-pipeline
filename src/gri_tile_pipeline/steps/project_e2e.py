@@ -694,6 +694,7 @@ def run_project_pipeline(
 
                     pred_tracker = run_predict_local(
                         predict_csv, dest, cfg,
+                        model_path=cfg.predict.model_path,
                         skip_existing=skip_existing,
                         max_workers=max_workers,
                     )
