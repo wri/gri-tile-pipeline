@@ -14,6 +14,8 @@ from typing import List
 import numpy as np
 from loguru import logger
 
+from gri_tile_pipeline.zonal.ttc_colormap import build_ttc_colormap
+
 
 def _filter_noise(band: np.ndarray) -> np.ndarray:
     """Apply morphological-max + threshold noise filtering to a TTC band.
@@ -131,6 +133,14 @@ def _run_gdal(cmd: list[str]) -> None:
         raise RuntimeError(f"{cmd[0]} failed: {result.stderr.strip()}")
 
 
+def _apply_ttc_colormap(path: str) -> None:
+    """Attach the legacy TTC green-ramp color table to band 1 of *path*."""
+    import rasterio
+
+    with rasterio.open(path, "r+") as dst:
+        dst.write_colormap(1, build_ttc_colormap())
+
+
 def build_mosaic_vrt(
     tile_paths: List[str],
     output_path: str | None = None,
@@ -144,7 +154,9 @@ def build_mosaic_vrt(
     ``gdal_translate``, so memory use stays flat regardless of how many
     tiles (e.g. a whole country's worth) are being combined. Noise
     filtering is applied per-tile before the VRT is built — see
-    :func:`_prefilter_tile`.
+    :func:`_prefilter_tile`. The output has the legacy TTC green-ramp
+    color table attached (see :mod:`gri_tile_pipeline.zonal.ttc_colormap`),
+    matching the visual style of the reference country mosaics.
 
     Args:
         tile_paths: Local paths to prediction GeoTIFF tiles.
@@ -182,6 +194,7 @@ def build_mosaic_vrt(
             "-co", "COMPRESS=LZW", "-co", "TILED=YES",
             "-a_nodata", "255",
         ])
+        _apply_ttc_colormap(output_path)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 

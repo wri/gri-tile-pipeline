@@ -114,3 +114,18 @@ class TestBuildMosaicVrt:
             b = ds.bounds
             assert b.left == pytest.approx(0.0, abs=1e-6)
             assert b.right == pytest.approx(0.01, abs=1e-6)
+
+    def test_output_has_ttc_colormap(self, tmp_path):
+        from gri_tile_pipeline.zonal.ttc_colormap import build_ttc_colormap
+
+        tile_a = _write_tile(tmp_path / "a.tif", 80, origin_x=0.0, origin_y=1.0)
+        output = tmp_path / "colored.tif"
+        build_mosaic_vrt([tile_a], output_path=str(output))
+
+        with rasterio.open(str(output)) as ds:
+            assert ds.colorinterp[0].name == "palette"
+            cmap = ds.colormap(1)
+        expected = build_ttc_colormap()
+        assert cmap[0] == expected[0]
+        assert cmap[80] == expected[80]
+        assert cmap[255] == expected[255]
