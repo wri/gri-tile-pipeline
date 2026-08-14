@@ -15,6 +15,9 @@ import pandas as pd
 from loguru import logger
 
 from gri_tile_pipeline.config import PipelineConfig
+from gri_shared_library.os_tools import get_project_root_dir
+
+PROJECT_ROOT_DIR = get_project_root_dir()
 
 
 def _cleanup_batch(tile_paths: List[str], mosaic_path: str) -> None:
@@ -32,15 +35,15 @@ def _cleanup_batch(tile_paths: List[str], mosaic_path: str) -> None:
 
 
 def run_zonal_stats(
-    polygons: str,
-    tiles_bucket: str,
-    year: int,
-    output: str,
-    cfg: PipelineConfig,
-    *,
-    lookup_parquet: str | None = None,
-    lookup_csv: str | None = None,
-    include_cols: list[str] | None = None,
+        polygons: str,
+        tiles_bucket: str,
+        year: int,
+        output: str,
+        cfg: PipelineConfig,
+        *,
+        lookup_parquet: str | None = None,
+        lookup_csv: str | None = None,
+        include_cols: list[str] | None = None,
 ) -> None:
     """Calculate zonal tree cover statistics for *polygons*.
 
@@ -64,6 +67,8 @@ def run_zonal_stats(
 
     # Resolve tile lookup source
     parquet = lookup_parquet or cfg.zonal.lookup_parquet
+    parquet = os.path.join(PROJECT_ROOT_DIR, parquet)
+
     csv = lookup_csv or cfg.zonal.lookup_csv
     lookup = load_tile_lookup(parquet_path=parquet, lookup_csv=csv)
 

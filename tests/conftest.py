@@ -8,6 +8,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from gri_shared_library.constants import TTC_TILEDB_FILEPATH, TERRAMATCH_GEOPARQUET_FILEPATH
+from gri_shared_library.os_tools import remove_file
+from gri_shared_library.productivity_tools import (download_ttc_test_data)
+from gri_shared_library.geoparquet_tools import clear_ttc_for_test_projects, thin_tm_geoparquet_to_test_projects
 from tests.constants import ARD_DIR, REFERENCE_TIF, MODEL_DIR
 
 # ---------------------------------------------------------------------------
@@ -73,3 +77,46 @@ def sample_feature_stack() -> np.ndarray:
 def sample_dates() -> np.ndarray:
     """24 evenly-spaced day-of-year values."""
     return np.linspace(0, 345, 24).astype(np.float64)
+
+
+def _is_controller(config):
+    # pytest-xdist sets `workerinput` on each worker process. The controller
+    # (and any non-distributed run, e.g. without -n) does NOT have it, so this
+    # is True exactly once per test session, regardless of worker count.
+    return not hasattr(config, "workerinput")
+
+
+def _setup_test_data():
+    if os.getenv("AWS_PROFILE"):
+        # pre-execution cleanup
+        remove_file(TTC_TILEDB_FILEPATH)
+        remove_file(TERRAMATCH_GEOPARQUET_FILEPATH)
+        # Prepare test projects
+        download_ttc_test_data()
+        thin_tm_geoparquet_to_test_projects()
+        clear_ttc_for_test_projects()
+        assert os.path.exists(TTC_TILEDB_FILEPATH)
+        assert os.path.exists(TERRAMATCH_GEOPARQUET_FILEPATH)
+
+
+def _teardown_test_data():
+    if os.getenv("AWS_PROFILE"):
+        # post-execution cleanup
+        remove_file(TTC_TILEDB_FILEPATH)
+        remove_file(TERRAMATCH_GEOPARQUET_FILEPATH)
+        assert not os.path.exists(TTC_TILEDB_FILEPATH)
+        assert not os.path.exists(TERRAMATCH_GEOPARQUET_FILEPATH)
+
+
+def pytest_configure(config):
+    # Runs on the controller before any worker is spawned -> setup happens once,
+    # and the data files are on disk before the workers start
+    # collecting/running.
+    if _is_controller(config):
+        _setup_test_data()
+
+
+def pytest_unconfigure(config):
+    # Runs on the controller after all workers have finished -> teardown once.
+    if _is_controller(config):
+        _teardown_test_data()
