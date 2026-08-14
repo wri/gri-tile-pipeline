@@ -81,7 +81,7 @@ members = ["packages/gri-tile-loaders"]
 
 [tool.uv.sources]
 gri-tile-loaders = { workspace = true }
-gri-shared-library = { git = "https://github.com/wri/gri-shared-library.git", branch = "GDP-116-Standardize-definition-of-indicator-windows-and-implement-across-the-pipeline"}
+gri-shared-library = { git = "https://github.com/wri/gri-shared-library.git", branch = "develop"}
 #gri-shared-library = { path = "/home/kennc/github/gri-shared-library"}
 
 [tool.pytest.ini_options]
