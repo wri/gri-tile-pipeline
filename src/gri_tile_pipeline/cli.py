@@ -797,9 +797,9 @@ def check(ctx, input_path, dest, year, year_from_plantstart, geoparquet,
     \b
     Examples:
         gri-ttc check 1000X871Y --year 2023
-        gri-ttc check tiles.csv --dest s3://tof-output --check-type raw_ard
-        gri-ttc check request.csv --dest s3://tof-output --geoparquet temp/tm.geoparquet
-        gri-ttc check polygons.geojson --dest s3://tof-output --year 2023
+        gri-ttc check tiles.csv --dest s3://wri-restoration-geodata-ttc --check-type raw_ard
+        gri-ttc check request.csv --dest s3://wri-restoration-geodata-ttc --geoparquet temp/tm.geoparquet
+        gri-ttc check polygons.geojson --dest s3://wri-restoration-geodata-ttc --year 2023
     """
     import os as _os
     from datetime import datetime as _dt
@@ -1283,7 +1283,7 @@ def cost_function(cfg, tiles_csv, mem=None, include_predict=False):
 # run
 # ---------------------------------------------------------------------------
 
-VALID_STEPS = {"download", "predict", "stats"}
+VALID_STEPS = {"download", "predict", "stats", "mosaic"}
 
 
 @gri_ttc.command()
@@ -1291,20 +1291,23 @@ VALID_STEPS = {"download", "predict", "stats"}
 @click.option("--dest", required=True, envvar="DEST",
               help="Output root (s3://bucket/prefix or local path).")
 @click.option("--steps", default="download,predict",
-              help="Comma-separated steps to run: download, predict, stats.")
+              help="Comma-separated steps to run: download, predict, mosaic, stats.")
 @click.option("--polygons", default=None, type=click.Path(exists=True),
-              help="Polygon file for zonal stats (required if 'stats' in --steps).")
+              help="Polygon file for zonal stats (required if 'stats' in --steps). "
+                   "Also used by 'mosaic' to clip the mosaic's bounds, if given.")
 @click.option("--year", type=int, default=None,
-              help="Year for zonal stats (required if 'stats' in --steps).")
+              help="Year for zonal stats / mosaic (required if 'stats' or 'mosaic' in --steps).")
 @click.option("-o", "--output", default="results.csv",
               help="Output CSV path for stats results.")
+@click.option("--mosaic-output", default="mosaic.tif",
+              help="Output GeoTIFF path for the 'mosaic' step.")
 @click.option("--local", is_flag=True, help="Run workers locally instead of via Lithops/Lambda.")
 @click.option("--max-workers", type=int, default=1, help="Parallel workers for --local mode.")
 @click.option("--skip-existing", is_flag=True, help="Skip tiles already on S3.")
 @click.option("--dry-run", is_flag=True, help="Preview what would happen without executing.")
 @click.option("--yes", is_flag=True, help="Skip interactive approval prompt.")
 @click.pass_context
-def run(ctx, tiles_csv, dest, steps, polygons, year, output,
+def run(ctx, tiles_csv, dest, steps, polygons, year, output, mosaic_output,
         local, max_workers, skip_existing, dry_run, yes):
     """Execute pipeline steps on a tiles CSV.
 
@@ -1313,10 +1316,13 @@ def run(ctx, tiles_csv, dest, steps, polygons, year, output,
 
     \b
     Examples:
-        gri-ttc run missing.csv --dest s3://tof-output --yes
-        gri-ttc run missing.csv --dest s3://tof-output --local --max-workers 4
-        gri-ttc run missing.csv --dest s3://tof-output --steps download,predict,stats \\
+        gri-ttc run missing.csv --dest s3://wri-restoration-geodata-ttc --yes
+        gri-ttc run missing.csv --dest s3://wri-restoration-geodata-ttc --local --max-workers 4
+        gri-ttc run missing.csv --dest s3://wri-restoration-geodata-ttc --steps download,predict,stats \\
             --polygons polygons.geojson --year 2023
+        gri-ttc run country_tiles.csv --dest s3://wri-restoration-geodata-ttc \\
+            --steps download,predict,mosaic --polygons country.geojson --year 2023 \\
+            --mosaic-output country_mosaic.tif --local --yes
     """
     from gri_tile_pipeline.tiles.csv_io import read_tiles_csv, write_tiles_csv
 
@@ -1326,6 +1332,9 @@ def run(ctx, tiles_csv, dest, steps, polygons, year, output,
     unknown = set(step_list) - VALID_STEPS
     if unknown:
         raise click.UsageError(f"Unknown steps: {sorted(unknown)}. Valid: {sorted(VALID_STEPS)}")
+
+    if "mosaic" in step_list and year is None:
+        raise click.UsageError("--year is required when 'mosaic' is in --steps")
 
     if "stats" in step_list:
         if not polygons:
@@ -1425,6 +1434,13 @@ def run(ctx, tiles_csv, dest, steps, polygons, year, output,
                 _os.remove(predict_csv)
             except OSError:
                 pass
+
+    # -- Mosaic --
+    if "mosaic" in step_list:
+        logger.info(f"Step: mosaic ({n} tiles, year={year}) -> {mosaic_output}")
+        from gri_tile_pipeline.steps.mosaic import run_mosaic
+
+        run_mosaic(tiles, dest, year, mosaic_output, cfg, polygons_path=polygons)
 
     # -- Stats --
     if "stats" in step_list:
@@ -1713,11 +1729,11 @@ def run_project(ctx, short_name, input_csv, project_ids, short_names_opt,
 
     \b
     Examples:
-        LITHOPS_ENV=datalab-test gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes
-        gri-ttc run-project --input request.csv --dest s3://tof-output --dry-run
-        gri-ttc run-project --short-name GHA_22_INEC --short-name RWA_23_AEE --dest s3://tof-output
-        gri-ttc run-project --poly-uuid abc-123 --year 2023 --dest s3://tof-output --local
-        gri-ttc run-project --where "country='GHA' AND YEAR(plantstart)=2023" --dest s3://tof-output
+        LITHOPS_ENV=datalab-test gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes
+        gri-ttc run-project --input request.csv --dest s3://wri-restoration-geodata-ttc --dry-run
+        gri-ttc run-project --short-name GHA_22_INEC --short-name RWA_23_AEE --dest s3://wri-restoration-geodata-ttc
+        gri-ttc run-project --poly-uuid abc-123 --year 2023 --dest s3://wri-restoration-geodata-ttc --local
+        gri-ttc run-project --where "country='GHA' AND YEAR(plantstart)=2023" --dest s3://wri-restoration-geodata-ttc
     """
     from gri_tile_pipeline.steps.project_e2e import run_project_pipeline
 

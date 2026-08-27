@@ -24,7 +24,6 @@ from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 from datetime import datetime
 
 import numpy as np
-import rasterio as rio
 # from rasterio.vrt import WarpedVRT
 # from rasterio.enums import Resampling
 # from rasterio.windows import from_bounds

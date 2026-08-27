@@ -7,7 +7,6 @@ environments without a plotting backend (the import only fails when
 
 from __future__ import annotations
 
-import sys
 
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 

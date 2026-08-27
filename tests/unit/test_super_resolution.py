@@ -1,7 +1,6 @@
 """Unit tests for preprocessing/super_resolution.py."""
 
 import numpy as np
-import pytest
 
 from gri_tile_pipeline.preprocessing.super_resolution import superresolve_tile
 

@@ -1,7 +1,6 @@
 """Unit tests for inference/postprocessing.py."""
 
 import numpy as np
-import pytest
 
 from gri_tile_pipeline.inference.postprocessing import apply_nodata_mask
 

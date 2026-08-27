@@ -31,8 +31,7 @@ resource "aws_iam_role_policy_attachment" "basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Lithops state buckets (futures, args, task logs) + the pipeline output bucket
-# (cross-account; the output bucket's policy must also grant this role).
+# Lithops state buckets (futures, args, task logs) + the pipeline output bucket.
 data "aws_iam_policy_document" "inline" {
   statement {
     sid     = "LithopsStateBuckets"
@@ -48,9 +47,29 @@ data "aws_iam_policy_document" "inline" {
     sid     = "OutputBucket"
     effect  = "Allow"
     actions = ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"]
+    resources = concat(
+      [
+        var.output_bucket_arn,
+        "${var.output_bucket_arn}/*",
+      ],
+      var.additional_output_bucket_arns,
+      [for arn in var.additional_output_bucket_arns : "${arn}/*"],
+    )
+  }
+
+  # External public/requester-pays buckets the loaders read from.
+  # - copernicus-dem-30m: Copernicus DEM GLO-30 via Earth Search (DEM loader).
+  # - sentinel-cogs: Sentinel-2 L2A COGs via Earth Search (S2 loader).
+  # Add entries here when a new external dataset is introduced.
+  statement {
+    sid     = "ExternalPublicDataRead"
+    effect  = "Allow"
+    actions = ["s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation"]
     resources = [
-      var.output_bucket_arn,
-      "${var.output_bucket_arn}/*",
+      "arn:aws:s3:::copernicus-dem-30m",
+      "arn:aws:s3:::copernicus-dem-30m/*",
+      "arn:aws:s3:::sentinel-cogs",
+      "arn:aws:s3:::sentinel-cogs/*",
     ]
   }
 

@@ -540,7 +540,6 @@ def identify_clouds_shadows(
         clouds[i][brightness_threshold.astype(bool)] = 0.0
 
     # Dilate clouds
-    struct2 = generate_binary_structure(2, 2)
     for i in range(clouds.shape[0]):
         clouds[i] = 1 - (binary_dilation(clouds[i] == 0, iterations=1))
         pfcps[i] = binary_dilation(pfcps[i], iterations=5)
@@ -818,7 +817,6 @@ def align_interp_array_lr(
 
     if np.sum(interp[date] > 0) > 0 and np.sum(interp[date] == 0) > 0:
         if np.mean(np.logical_and(interp[date] < 1, water_mask <= 1)) > 0.01:
-            array_i = np.copy(array[date])
             interp_array_i = np.copy(interp_array[0])
 
             n_current_time = np.sum(np.logical_and(interp[date] == 0, water_mask <= 1))

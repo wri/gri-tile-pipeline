@@ -18,8 +18,8 @@ def _lithops_paths_for_env(env: str) -> dict[str, str]:
     """Paths produced by infra/lithops/render.py for a given env."""
     base = f".lithops/{env}"
     return {
-        "euc1_config": f"{base}/config.gri_tile_loaders-euc1.yaml",
-        "usw2_config": f"{base}/config.gri_tile_loaders-usw2.yaml",
+        "euc1_config": f"{base}/config.loaders-euc1.yaml",
+        "usw2_config": f"{base}/config.loaders-usw2.yaml",
         "s1_usw2_config": f"{base}/config.s1.yaml",
         "predict_config": f"{base}/config.predict.yaml",
     }
@@ -27,7 +27,7 @@ def _lithops_paths_for_env(env: str) -> dict[str, str]:
 
 @dataclass
 class DownloadConfig:
-    runtime: str = "ttc-gri_tile_loaders-dev"
+    runtime: str = "ttc-loaders-dev"
     memory_mb: int = 4096
     retries: int = 3
 
@@ -55,7 +55,7 @@ class S1RTCConfig:
 
 @dataclass
 class ZonalConfig:
-    tile_bucket: str = "tof-output"
+    tile_bucket: str = "wri-restoration-geodata-ttc"
     tile_region: str = "us-east-1"
     small_sites_area_thresh: float = 0.5
     lulc_raster_path: str = ""
@@ -70,8 +70,8 @@ class LithopsConfig:
     usw2_config: str = ".lithops/config.usw2.yaml"
     s1_usw2_config: str = ".lithops/config.s1_usw2.yaml"
     # No default: the old legacy path was us-west-2, which silently cross-regioned
-    # writes to `tof-output` (us-east-1). Require explicit opt-in via LITHOPS_ENV or
-    # a per-key YAML override so misconfiguration fails loud at the point of use.
+    # writes to the predictions bucket (us-east-1). Require explicit opt-in via
+    # LITHOPS_ENV or a per-key YAML override so misconfiguration fails loud at use.
     predict_config: str = ""
 
 

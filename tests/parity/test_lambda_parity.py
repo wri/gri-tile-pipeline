@@ -13,7 +13,7 @@ compares the output to:
      drift that reference-only comparison would miss).
 
 Skipped unless ``PARITY_LAMBDA=1`` is set. Both tests require:
-  - ARD for the 3 golden tiles uploaded to ``--dest`` (default ``s3://tof-output``)
+  - ARD for the 3 golden tiles uploaded to ``--dest`` (default ``s3://wri-restoration-geodata-ttc``)
   - ``.lithops/land-research/config.predict.yaml`` rendered (see docs/setup.md)
   - ``AWS_PROFILE=resto-user`` (or another profile with access to the bucket)
 
@@ -41,7 +41,7 @@ for p in (str(REPO_ROOT), str(REPO_ROOT / "gri_tile_loaders")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from tests.constants import GOLDEN_DIR, GOLDEN_TILES, MODEL_DIR
+from tests.constants import GOLDEN_DIR, MODEL_DIR
 from tests.parity.metrics import aggregate_golden_report, compare_predictions
 
 
@@ -93,7 +93,7 @@ def _env() -> str:
 
 
 def _dest() -> str:
-    return os.environ.get("PARITY_DEST", "s3://tof-output")
+    return os.environ.get("PARITY_DEST", "s3://wri-restoration-geodata-ttc")
 
 
 def _lithops_config_path() -> Path:
@@ -143,7 +143,6 @@ def _download_prediction(dest: str, year: int, x_tile: int, y_tile: int) -> np.n
 def _invoke_lambda_for_tiles(year: int, dest: str) -> dict[str, np.ndarray]:
     """Map the 3 golden tiles through the deployed predict Lambda."""
     import yaml
-    import lithops
     from lithops import FunctionExecutor
 
     # Mirror the import path used by scripts/predict_lambda_smoke.py so Lithops

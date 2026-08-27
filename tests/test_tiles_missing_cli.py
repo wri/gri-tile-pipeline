@@ -220,7 +220,7 @@ def test_polygon_ids_none_when_option_absent(runner):
 # --------------------------------------------------------------------------- #
 def test_no_work_exits_with_no_work_code(runner):
     with patch(P_GET_CTX, return_value=_make_gri()), \
-         patch(P_GENERATE, return_value=[]) as m_gen, \
+         patch(P_GENERATE, return_value=[]), \
          patch(P_WRITE_CSV) as m_write, \
          patch(P_EMIT_JSON) as m_emit:
         result = runner.invoke(tiles_missing, ["-o", "out.csv"])

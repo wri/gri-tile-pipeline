@@ -4,33 +4,34 @@ This directory holds all AWS infrastructure code for the GRI tile pipeline.
 
 ## Ownership model
 
-Terraform owns the minimum. Lithops keeps ownership of its ECR repos, container
-images, and Lambda functions — we deploy exclusively via `lithops runtime build`
-and `lithops runtime deploy`.
+Single AWS account: **land-research** (`058755926933`). Terraform owns the
+minimum — Lithops keeps ownership of its ECR repos, container images,
+and Lambda functions, which we deploy via `lithops runtime build` and
+`lithops runtime deploy`.
 
-| Resource                                    | Owner                   |
-| ------------------------------------------- | ----------------------- |
-| Lambda execution role (IAM)                 | Terraform               |
-| Lithops state S3 buckets (one per region)   | Terraform               |
-| Cross-account S3 access on `tof-output`     | Terraform (wri account) |
-| Terraform state backend                     | Terraform bootstrap     |
-| ECR repositories                            | Lithops                 |
-| Container images                            | Lithops (`runtime build`) |
+| Resource                                    | Owner                              |
+| ------------------------------------------- | ---------------------------------- |
+| Lambda execution role (IAM)                 | Terraform                          |
+| Lithops state S3 buckets (one per region)   | Terraform                          |
+| TTC data bucket (`wri-restoration-geodata-ttc`) | Terraform                      |
+| Terraform state backend (shared)            | `gri-prefect-orchestration` workflow — this pipeline writes to key `gri-tile-pipeline/lr.tfstate` in `wri-restoration-terraform-state-lr` |
+| ECR repositories                            | Lithops                            |
+| Container images                            | Lithops (`runtime build`)          |
 | Lambda functions                            | Lithops (`runtime deploy` or lazy) |
-| Lithops configs (`.lithops/<env>/*.yaml`)   | `make render`           |
+| Lithops configs (`.lithops/<env>/*.yaml`)   | `make render`                      |
 
 ## Layout
 
 ```
 infra/
 ├── terraform/
-│   ├── bootstrap/                     # One-shot: TF state bucket + DynamoDB lock
 │   ├── modules/
 │   │   ├── lithops-iam-role/          # Lambda execution role
-│   │   ├── lithops-prereqs/           # Per-region state bucket
-│   │   └── cross-account-s3-access/   # tof-output policy in wri account
+│   │   ├── lithops-prereqs/           # Per-region Lithops state bucket
+│   │   └── cross-account-s3-access/   # Only used by legacy datalab-test env
 │   └── envs/
-│       └── land-research/             # Wires the modules together
+│       ├── land-research/             # Primary: single-account, shared TF state
+│       └── datalab-test/              # Legacy: two-account dev env, local state
 ├── lithops/
 │   ├── config.*.yaml.tmpl             # Templates rendered from Terraform outputs
 │   └── render.py
@@ -40,36 +41,29 @@ infra/
 ## Prerequisites
 
 - Terraform >= 1.5
-- AWS CLI v2 configured with credentials for:
-  - The **land-research** account (admin for initial apply)
-  - The **wri** account (admin on the `tof-output` bucket policy)
+- AWS CLI v2 with SSO profiles for land-research:
+  - `AWSAdministratorAccess-058755926933` — for `terraform apply` and
+    `lithops runtime build/deploy`
+  - `LandResearchUser-058755926933` — day-to-day workflow runs (`gri-ttc`)
 - Lithops installed in the local venv (`uv sync --extra loaders --extra predict`)
-- Docker running locally (Lithops uses it to build container images)
-
-## One-time bootstrap
-
-Run once per new AWS account. Creates the Terraform state bucket and DynamoDB
-lock table so all subsequent applies use remote state.
-
-```bash
-cd infra/terraform/bootstrap
-terraform init
-terraform apply
-```
-
-Capture the outputs; they feed the backend config for `envs/land-research`.
+- Docker running locally, with the containerd image store disabled
+  (Lambda only accepts Docker manifest v2)
 
 ## Deploy the env
 
 ```bash
 cd infra/terraform/envs/land-research
-terraform init
-terraform apply
+
+AWS_PROFILE=AWSAdministratorAccess-058755926933 terraform init \
+    -backend-config=bucket=wri-restoration-terraform-state-lr \
+    -backend-config=region=us-east-1 \
+    -backend-config=dynamodb_table=terraform-state-lock
+
+AWS_PROFILE=AWSAdministratorAccess-058755926933 terraform apply
 ```
 
-This creates the IAM execution role, per-region Lithops state S3 buckets, and
-the cross-account bucket policy on `tof-output` (needs wri credentials via
-provider alias).
+Creates the IAM execution role, the three per-region Lithops state
+buckets, and the `wri-restoration-geodata-ttc` data bucket.
 
 ## Build and deploy Lithops runtimes
 
@@ -77,21 +71,22 @@ From the repo root:
 
 ```bash
 # Render Lithops configs from Terraform outputs into .lithops/land-research/
-make -C infra render ENV=land-research
+AWS_PROFILE=AWSAdministratorAccess-058755926933 make -C infra render ENV=land-research
 
 # Build each runtime (Lithops creates ECR repo + pushes image)
-make -C infra build-predict ENV=land-research
-make -C infra build-gri_tile_loaders-usw2 ENV=land-research
-make -C infra build-gri_tile_loaders-euc1 ENV=land-research
-make -C infra build-s1 ENV=land-research
+AWS_PROFILE=AWSAdministratorAccess-058755926933 make -C infra build-predict ENV=land-research
+AWS_PROFILE=AWSAdministratorAccess-058755926933 make -C infra build-loaders-usw2 ENV=land-research
+AWS_PROFILE=AWSAdministratorAccess-058755926933 make -C infra build-loaders-euc1 ENV=land-research
+AWS_PROFILE=AWSAdministratorAccess-058755926933 make -C infra build-s1 ENV=land-research
 
 # Or all at once:
-make -C infra build-all ENV=land-research
+AWS_PROFILE=AWSAdministratorAccess-058755926933 make -C infra build-all ENV=land-research
 ```
 
-Switch the pipeline to the new account for a run:
+Drive the pipeline:
 
 ```bash
-LITHOPS_ENV=land-research gri-ttc predict tiles.csv --dest s3://tof-output
+export AWS_PROFILE=AWSAdministratorAccess-058755926933   # or LandResearchUser-058755926933
+export LITHOPS_ENV=land-research
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes
 ```
-

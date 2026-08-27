@@ -110,7 +110,7 @@ def main():
     )
     parser.add_argument("csv", help="Path to tiles CSV (Year,X,Y,Y_tile,X_tile)")
     parser.add_argument(
-        "--bucket", default="tof-output", help="S3 bucket containing ARD (default: tof-output)"
+        "--bucket", default="wri-restoration-geodata-ttc", help="S3 bucket containing ARD (default: wri-restoration-geodata-ttc)"
     )
     parser.add_argument(
         "--region", default="us-east-1", help="S3 bucket region (default: us-east-1)"
@@ -156,7 +156,7 @@ def main():
             pred_key = prediction_key(t["year"], t["X_tile"], t["Y_tile"])
             local_tif = os.path.join(args.output_dir, pred_key)
             print(f"[{i}/{len(tiles)}] {tag} year={t['year']}")
-            print(f"  ARD keys to download:")
+            print("  ARD keys to download:")
             for key in raw_ard_keys(t["year"], t["X_tile"], t["Y_tile"]):
                 print(f"    s3://{args.bucket}/{key}")
             print(f"  Output: {local_tif}")
@@ -260,7 +260,6 @@ def main():
 
         # Also print a single combined command if multiple tiles
         if len(successes) > 1:
-            tiles_dir = os.path.join(args.output_dir)
             print("Or sync the entire output directory:")
             # Find common year prefix
             years = sorted(set(s["year"] for s in successes))

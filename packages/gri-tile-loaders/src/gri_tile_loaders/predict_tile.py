@@ -29,6 +29,20 @@ from loguru import logger
 from gri_tile_pipeline.phase_timer import PhaseTimer, timed
 
 
+class NoS2DataError(ValueError):
+    """No S2 acquisitions available for this tile/year.
+
+    Raised by ``predict_tile_from_arrays`` when the ARD has zero S2
+    timesteps — e.g. download_s2's STAC search returned no items, or the
+    SCL cloud filter dropped every candidate. Without S2 the predict
+    pipeline can't run (target dims H,W are derived from s2_20 shape),
+    and silently propagating an empty array surfaces downstream as an
+    ``OverflowError: cannot convert float infinity to integer`` inside
+    ``sk_resize``. Subclasses ValueError so existing ``except ValueError``
+    blocks still catch it.
+    """
+
+
 _MODEL_SHA256_CACHE: Dict[str, str] = {}
 
 # Files the Dockerfile bakes the pipeline git sha into. Checked in order;
@@ -374,6 +388,40 @@ def predict_tile_from_arrays(
     # ------------------------------------------------------------------
     # 2. Align spatial dimensions: target = 2 × s2_20 shape (reference lines 800-806)
     # ------------------------------------------------------------------
+    # First defend against a temporal-axis mismatch between the s2 arrays
+    # and s2_dates. The loader normally writes them in lockstep, but for
+    # some tiles (observed: 1749X1160Y / 1749X1161Y on PADO 2021) the
+    # s2_dates.hkl came back with one fewer entry than s2_10.hkl — every
+    # subsequent np.delete / fancy-indexing step on the two arrays then
+    # diverges, eventually surfacing as "index 23 is out of bounds for
+    # axis 0 with size 23" inside the cloud-pruning loop. Truncate the
+    # other arrays to the common length so all per-timestep operations
+    # see the same T from here on.
+    T_common = min(s2_10.shape[0], s2_20.shape[0], len(s2_dates))
+    if (s2_10.shape[0] != T_common or s2_20.shape[0] != T_common
+            or len(s2_dates) != T_common):
+        logger.warning(
+            "ARD temporal axes out of sync — truncating to T=%d "
+            "(s2_10=%d, s2_20=%d, s2_dates=%d)",
+            T_common, s2_10.shape[0], s2_20.shape[0], len(s2_dates),
+        )
+        s2_10    = s2_10[:T_common]
+        s2_20    = s2_20[:T_common]
+        s2_dates = s2_dates[:T_common]
+
+    # H/W are derived from s2_20 below; if T==0 the spatial dims are also
+    # zero (download_s2 writes (0,0,0,N) when STAC returns no items or
+    # SCL drops every candidate), and sk_resize to a (0,0) target divides
+    # by zero in scipy.ndimage.gaussian_filter1d → int(inf) overflow.
+    # Bail out before we get there so the failure is named, not cryptic.
+    if T_common == 0:
+        raise NoS2DataError(
+            f"No S2 acquisitions for tile (s2_10={s2_10.shape}, "
+            f"s2_20={s2_20.shape}, s2_dates={s2_dates.shape}). "
+            "Check upstream download_s2 — likely STAC returned no items "
+            "or the SCL cloud filter dropped every candidate."
+        )
+
     T = s2_10.shape[0]
     H = s2_20.shape[1] * 2  # target height (rows)
     W = s2_20.shape[2] * 2  # target width (cols)
@@ -522,9 +570,16 @@ def predict_tile_from_arrays(
             keep = np.setdiff1d(np.arange(s2_full.shape[0]), to_drop)
             s2_full = s2_full[keep]
             s2_dates = s2_dates[keep]
-            # Also prune CLM to match
+            # Also prune CLM to match. clm can be shorter than s2_full (the
+            # clouds.hkl loader sometimes omits the trailing timesteps;
+            # downstream code handles this at line 503 via
+            # `clm[:s2_full.shape[0]]`). Filter to_drop to clm-valid
+            # indices so np.delete doesn't blow up on indices that don't
+            # exist in clm.
             if clm is not None:
-                clm = np.delete(clm, to_drop, axis=0)
+                clm_drops = to_drop[to_drop < clm.shape[0]]
+                if len(clm_drops):
+                    clm = np.delete(clm, clm_drops, axis=0)
             # Re-detect clouds on reduced image stack
             cloud_probs, fcps = identify_clouds_shadows(s2_full, dem_raw)
             # Re-merge CLM after re-detection (reference lines 959-965)
@@ -858,13 +913,35 @@ def run(
                 "s2_dates": f"{base_key}/misc/s2_dates_{tag}.hkl",
             }
             logger.info(f"Loading ARD for {tag}")
-        with timed(phase_timer, "s3_download_hkl"):
-            s2_10    = _load_hkl(store, ard_keys["s2_10"])
-            s2_20    = _load_hkl(store, ard_keys["s2_20"])
-            s1       = _load_hkl(store, ard_keys["s1"])
-            dem      = _load_hkl(store, ard_keys["dem"])
-            clouds   = _load_hkl(store, ard_keys["clouds"])
-            s2_dates = _load_hkl(store, ard_keys["s2_dates"])
+        try:
+            with timed(phase_timer, "s3_download_hkl"):
+                s2_10    = _load_hkl(store, ard_keys["s2_10"])
+                s2_20    = _load_hkl(store, ard_keys["s2_20"])
+                s1       = _load_hkl(store, ard_keys["s1"])
+                dem      = _load_hkl(store, ard_keys["dem"])
+                clouds   = _load_hkl(store, ard_keys["clouds"])
+                s2_dates = _load_hkl(store, ard_keys["s2_dates"])
+        except FileNotFoundError as e:
+            # A required ARD artifact never landed — most commonly
+            # raw/s1/<tile>.hkl, when the S1 RTC -> Earth Search GRD fallback
+            # couldn't recover the tile (download reports the S1 leg
+            # "recovered" but writes nothing). Predict can't run without it,
+            # but a single gap tile must not fail the whole batch. Return a
+            # non-fatal "partial" so run_predict's (status not in
+            # success/partial) gate skips it; the tile produces no prediction
+            # and its polygons fall through to compute_ttc's no-coverage skip.
+            # Scoped to the ARD load so a genuinely missing model/other file
+            # still surfaces as a hard failure below.
+            logger.warning(f"predict_tile no-data skip for {tag}: missing ARD artifact: {e}")
+            return {
+                "status": "partial",
+                "error_message": str(e),
+                "error_type": "no_data",
+                "tile": tag,
+                "year": year,
+                "phase_timings": phase_timer.as_dict(),
+                "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
+            }
 
         # -------------------------------------------------------
         # 2-8. Run prediction pipeline
@@ -933,8 +1010,29 @@ def run(
             "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
         }
 
+    except NoS2DataError as e:
+        # No usable S2 acquisitions for this tile — a coverage gap, not a
+        # pipeline failure. Return non-fatal "partial" so run_predict's
+        # `status not in (success, partial)` gate skips it rather than failing
+        # the whole batch; the tile's polygons fall through to compute_ttc's
+        # no-coverage skip. (Missing ARD *artifacts* are handled with the same
+        # semantics at the load step above.)
+        logger.warning(f"predict_tile no-data skip for {tag}: {e}")
+        return {
+            "status": "partial",
+            "error_message": str(e),
+            "error_type": "no_data",
+            "tile": tag,
+            "year": year,
+            "phase_timings": phase_timer.as_dict(),
+            "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
+        }
     except Exception as e:
-        logger.error(f"predict_tile failed for {tag}: {e}")
+        # Log the full traceback to CloudWatch so we can diagnose without
+        # having to fish through Lithops result dicts. The traceback is
+        # also returned in `error_traceback` (below) but CloudWatch is
+        # easier to read live.
+        logger.error(f"predict_tile failed for {tag}: {e}\n{traceback.format_exc()}")
         return {
             "status": "failed",
             "error_message": str(e),

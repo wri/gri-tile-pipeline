@@ -6,11 +6,32 @@ Ported from reference ``ttc_s3_utils.py`` ``build_vrt`` / ``make_mosaic``.
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import tempfile
 from typing import List
 
 import numpy as np
 from loguru import logger
+
+from gri_tile_pipeline.zonal.ttc_colormap import build_ttc_colormap
+
+
+def _filter_noise(band: np.ndarray) -> np.ndarray:
+    """Apply morphological-max + threshold noise filtering to a TTC band.
+
+    Matches the reference ``make_mosaic`` cleanup: drop pixels with no
+    high-confidence neighborhood, and rescale everything below the
+    saturation threshold.
+    """
+    import scipy.ndimage
+
+    arr_filtered = scipy.ndimage.maximum_filter(band, 3)
+    arr_float = band.astype(np.float32)
+    arr_float[arr_float <= 0.97] = arr_float[arr_float <= 0.97] / 0.97
+    arr_float[arr_filtered < 30] = 0.0
+    arr_float[arr_float < 20] = 0.0
+    return arr_float.astype(np.uint8)
 
 
 def build_mosaic(
@@ -22,6 +43,10 @@ def build_mosaic(
 
     1. Merge tiles via rasterio.merge (optionally clipped to *bounds*)
     2. Apply noise filtering (morphological max + threshold)
+
+    Loads the full merged array into memory — fine for the handful of
+    tiles in a single polygon cluster, but not for country-scale areas.
+    See :func:`build_mosaic_vrt` for a streaming alternative.
 
     Args:
         tile_paths: Local paths to prediction GeoTIFF tiles.
@@ -36,7 +61,6 @@ def build_mosaic(
     """
     import rasterio
     from rasterio.merge import merge
-    import scipy.ndimage
 
     if not tile_paths:
         raise ValueError("No tile paths provided")
@@ -59,15 +83,7 @@ def build_mosaic(
             ds.close()
 
     # arr shape is (bands, height, width) — we only need band 1
-    band = arr[0].copy()
-
-    # Step 2: Noise filtering (matching reference make_mosaic)
-    arr_filtered = scipy.ndimage.maximum_filter(band, 3)
-    arr_float = band.astype(np.float32)
-    arr_float[arr_float <= 0.97] = arr_float[arr_float <= 0.97] / 0.97
-    arr_float[arr_filtered < 30] = 0.0
-    arr_float[arr_float < 20] = 0.0
-    arr_out = arr_float.astype(np.uint8)
+    arr_out = _filter_noise(arr[0])
 
     # Write output
     profile = {
@@ -85,4 +101,102 @@ def build_mosaic(
         dst.write(arr_out, 1)
 
     logger.info(f"Mosaic built: {output_path} ({arr_out.shape})")
+    return output_path
+
+
+def _prefilter_tile(tile_path: str, out_dir: str) -> str:
+    """Apply :func:`_filter_noise` to a single tile, writing a filtered copy.
+
+    Filtering per-tile (rather than on a merged country-sized array) keeps
+    peak memory at O(1 tile) regardless of how many tiles are being
+    mosaicked, and avoids seam artifacts that windowed post-merge filtering
+    would introduce at window boundaries.
+    """
+    import rasterio
+
+    out_path = os.path.join(out_dir, os.path.basename(tile_path))
+    with rasterio.open(tile_path) as src:
+        band = src.read(1)
+        profile = src.profile
+
+    filtered = _filter_noise(band)
+    profile.update(dtype="uint8", nodata=255, compress="lzw")
+    with rasterio.open(out_path, "w", **profile) as dst:
+        dst.write(filtered, 1)
+
+    return out_path
+
+
+def _run_gdal(cmd: list[str]) -> None:
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"{cmd[0]} failed: {result.stderr.strip()}")
+
+
+def _apply_ttc_colormap(path: str) -> None:
+    """Attach the legacy TTC green-ramp color table to band 1 of *path*."""
+    import rasterio
+
+    with rasterio.open(path, "r+") as dst:
+        dst.write_colormap(1, build_ttc_colormap())
+
+
+def build_mosaic_vrt(
+    tile_paths: List[str],
+    output_path: str | None = None,
+    bounds: tuple[float, float, float, float] | None = None,
+) -> str:
+    """Build a mosaic GeoTIFF from prediction tiles without materializing
+    the full merged array in memory.
+
+    Unlike :func:`build_mosaic` (which uses ``rasterio.merge`` and loads
+    everything at once), this streams the merge via ``gdalbuildvrt`` +
+    ``gdal_translate``, so memory use stays flat regardless of how many
+    tiles (e.g. a whole country's worth) are being combined. Noise
+    filtering is applied per-tile before the VRT is built — see
+    :func:`_prefilter_tile`. The output has the legacy TTC green-ramp
+    color table attached (see :mod:`gri_tile_pipeline.zonal.ttc_colormap`),
+    matching the visual style of the reference country mosaics.
+
+    Args:
+        tile_paths: Local paths to prediction GeoTIFF tiles.
+        output_path: Desired output path. If None, uses a temp file.
+        bounds: Optional (xmin, ymin, xmax, ymax) to clip the mosaic to.
+
+    Returns:
+        Path to the mosaic GeoTIFF.
+    """
+    if not tile_paths:
+        raise ValueError("No tile paths provided")
+
+    if output_path is None:
+        output_path = os.path.join(
+            tempfile.mkdtemp(prefix="ttc_mosaic_"), "mosaic.tif"
+        )
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    work_dir = tempfile.mkdtemp(prefix="ttc_mosaic_vrt_")
+    try:
+        filtered_dir = os.path.join(work_dir, "filtered")
+        os.makedirs(filtered_dir, exist_ok=True)
+        filtered_paths = [_prefilter_tile(p, filtered_dir) for p in tile_paths]
+
+        vrt_path = os.path.join(work_dir, "mosaic.vrt")
+        vrt_cmd = ["gdalbuildvrt"]
+        if bounds is not None:
+            xmin, ymin, xmax, ymax = bounds
+            vrt_cmd += ["-te", str(xmin), str(ymin), str(xmax), str(ymax)]
+        vrt_cmd += [vrt_path, *filtered_paths]
+        _run_gdal(vrt_cmd)
+
+        _run_gdal([
+            "gdal_translate", vrt_path, output_path,
+            "-co", "COMPRESS=LZW", "-co", "TILED=YES",
+            "-a_nodata", "255",
+        ])
+        _apply_ttc_colormap(output_path)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+    logger.info(f"Mosaic built: {output_path} ({len(tile_paths)} tiles)")
     return output_path

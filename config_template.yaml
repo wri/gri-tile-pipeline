@@ -25,8 +25,8 @@ pipeline:
 # Override individual keys here if you need a custom path.
 
 # lithops:
-#   euc1_config:    .lithops/land-research/config.gri_tile_loaders-euc1.yaml
-#   usw2_config:    .lithops/land-research/config.gri_tile_loaders-usw2.yaml
+#   euc1_config:    .lithops/land-research/config.loaders-euc1.yaml
+#   usw2_config:    .lithops/land-research/config.loaders-usw2.yaml
 #   s1_usw2_config: .lithops/land-research/config.s1.yaml
 #   predict_config: .lithops/land-research/config.predict.yaml
 
@@ -35,7 +35,7 @@ pipeline:
 # =============================================================================
 
 download:
-  runtime: ttc-gri_tile_loaders-dev     # Lithops runtime tag (ECR image name)
+  runtime: ttc-loaders-dev     # Lithops runtime tag (ECR image name)
   memory_mb: 4096              # Lambda memory; affects cost & speed
   retries: 3
 
@@ -64,7 +64,7 @@ predict:
 # =============================================================================
 
 zonal:
-  tile_bucket: tof-output      # S3 bucket hosting the prediction tiles
+  tile_bucket: wri-restoration-geodata-ttc  # S3 bucket hosting the prediction tiles
   tile_region: us-east-1
   small_sites_area_thresh: 0.5 # hectares; below this -> small-site handling
   lulc_raster_path: ""         # optional LULC raster URI for error propagation

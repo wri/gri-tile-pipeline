@@ -183,7 +183,6 @@ def calcSlope(inBlock,
     outBlock = np.zeros_like(inBlock, dtype=np.float32)
     if fitPlane:
         # Setup matrix and vector required for least squares fitting.
-        winOffset = int(winSize / 2)
         A_mat = np.zeros((winSize**2, 3))
         z_vec = np.zeros(winSize**2)
 
