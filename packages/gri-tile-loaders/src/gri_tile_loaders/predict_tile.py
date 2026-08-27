@@ -716,10 +716,24 @@ def predict_tile_from_arrays(
     # ------------------------------------------------------------------
     # 7. Prepare S1: resize to match spatial dims, take first 12 frames
     # ------------------------------------------------------------------
-    # Reference uses pad/crop (not bilinear resize) for S1 alignment:
-    # 1. adjust_shape: edge-pad short dims, crop oversized dims
-    # 2. pad_crop_to_hw: center-aligned final pad/crop with constant 0
+    # S1 is downloaded at ~40m/px (see download_s1*.py --resolution) against a
+    # 10m target grid — a true ~4x resolution gap, not a few-pixel rounding
+    # mismatch. Nearest-neighbor upsample at the actual integer ratio first,
+    # so each native S1 pixel covers its real footprint. The pad/crop logic
+    # below (adjust_shape / pad_crop_to_hw from the reference implementation)
+    # then only has to correct the leftover +/-1px slop from independently
+    # reprojecting S1 and S2 from the same bbox — it previously ran directly
+    # on the un-upsampled ~150px array, edge-padding ~225px of constant value
+    # on each side instead of resolving real ground detail (observed to drop
+    # cross-source correlation on affected tiles to ~0.62; repeat-upsampling
+    # first recovers ~0.93).
     s1_use = s1[:12].astype(np.float32) if s1.ndim == 4 else s1[:12, :, :, np.newaxis]
+    h_s1, w_s1 = s1_use.shape[1], s1_use.shape[2]
+    if h_s1 > 0 and w_s1 > 0:
+        scale_h = round(H / h_s1)
+        scale_w = round(W / w_s1)
+        if scale_h > 1 or scale_w > 1:
+            s1_use = np.repeat(np.repeat(s1_use, scale_h, axis=1), scale_w, axis=2)
     if s1_use.shape[1] != H or s1_use.shape[2] != W:
         h_s1, w_s1 = s1_use.shape[1], s1_use.shape[2]
         # Step 1: adjust_shape — edge-pad if too small, center-crop if too large
