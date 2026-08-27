@@ -2,7 +2,6 @@
 
 import os
 
-import pytest
 
 from gri_tile_pipeline.storage.tile_paths import raw_ard_keys
 

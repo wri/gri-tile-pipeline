@@ -202,7 +202,7 @@ def ensure_dirs(store: Union[S3Store, LocalStore], *dirs: str) -> None:
                 Path(store.prefix, d).mkdir(parents=True, exist_ok=True)
             else:
                 obs.put(store, d.rstrip("/") + "/.keep", b"")
-        except:
+        except Exception:
             pass
 
 @dataclass

@@ -6,11 +6,14 @@ import csv
 import json
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
 from gri_tile_pipeline.tracking.job_result import JobResult
+
+if TYPE_CHECKING:
+    from gri_tile_pipeline.tracking.run_metadata import StepResult
 
 
 class JobTracker:

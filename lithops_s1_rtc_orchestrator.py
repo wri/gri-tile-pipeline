@@ -787,8 +787,10 @@ def main() -> None:
     print(f"   EU-Central-1: {len(futures_euc1)} jobs")
     print(f"   US-West-2: {len(futures_usw2)} jobs")
     
-    results_euc1 = _wait_all_with_tracking(retry_euc1, futures_euc1, tracker) if futures_euc1 else []
-    results_usw2 = _wait_all_with_tracking(retry_usw2, futures_usw2, tracker) if futures_usw2 else []
+    if futures_euc1:
+        _wait_all_with_tracking(retry_euc1, futures_euc1, tracker)
+    if futures_usw2:
+        _wait_all_with_tracking(retry_usw2, futures_usw2, tracker)
     
     # Optional plotting
     if args.plot:

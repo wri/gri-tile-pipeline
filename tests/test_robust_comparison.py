@@ -76,7 +76,7 @@ def analyze_differences(arr1, arr2, name1="Image 1", name2="Image 2"):
     logger.info(f"  Std:  {np.std(arr2_valid):.2f}")
     logger.info(f"  Range: [{np.min(arr2_valid):.2f}, {np.max(arr2_valid):.2f}]")
     
-    logger.info(f"\nDifference statistics:")
+    logger.info("\nDifference statistics:")
     logger.info(f"  Mean difference: {np.mean(diff_valid):.3f}")
     logger.info(f"  Mean absolute difference: {np.mean(abs_diff_valid):.3f}")
     logger.info(f"  Max absolute difference: {np.max(abs_diff_valid):.3f}")
@@ -88,7 +88,7 @@ def analyze_differences(arr1, arr2, name1="Image 1", name2="Image 2"):
     
     # Percentile analysis
     percentiles = [50, 90, 95, 99]
-    logger.info(f"\nAbsolute difference percentiles:")
+    logger.info("\nAbsolute difference percentiles:")
     for p in percentiles:
         val = np.percentile(abs_diff_valid, p)
         logger.info(f"  {p}th percentile: {val:.3f}")
@@ -229,8 +229,8 @@ def main():
     
     # Create plots if requested
     if args.plot:
-        plot_file = create_comparison_plots(arr1_analysis, arr2_analysis, 
-                                          args.name1, args.name2, args.output_prefix)
+        create_comparison_plots(arr1_analysis, arr2_analysis,
+                                 args.name1, args.name2, args.output_prefix)
     
     # Summary assessment
     logger.info("=" * 60)
@@ -250,7 +250,7 @@ def main():
         else:
             logger.error("🔴 POOR: Low correlation or large differences")
         
-        logger.info(f"Key metrics:")
+        logger.info("Key metrics:")
         logger.info(f"  • Correlation: {correlation:.4f}")
         logger.info(f"  • Mean absolute difference: {mean_abs_diff:.2f}%")
         logger.info(f"  • RMSE: {stats['rmse']:.2f}%")

@@ -1,6 +1,5 @@
 """Parity test: feature stack from real ARD has correct shape and channel ranges."""
 
-import os
 from pathlib import Path
 
 import numpy as np
@@ -21,7 +20,6 @@ def test_feature_stack_shape_and_channels(ard_dir):
     import hickle as hkl
     from skimage.transform import resize as sk_resize
 
-    from gri_tile_pipeline.inference.normalize import MAX_ALL, MIN_ALL
     from gri_tile_pipeline.preprocessing.cloud_removal import (
         id_missing_px,
         interpolate_na_vals,

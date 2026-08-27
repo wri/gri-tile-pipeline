@@ -12,6 +12,11 @@ from typing import Any, Dict, List, Tuple
 import yaml
 from loguru import logger
 
+from gri_tile_pipeline.config import PipelineConfig
+from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
+from gri_tile_pipeline.tracking import JobTracker
+from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
+
 
 def _require_predict_config(path: str) -> None:
     """Fail loud before fanning out if the Lithops predict config is unusable.
@@ -35,12 +40,6 @@ def _require_predict_config(path: str) -> None:
             "If you set LITHOPS_ENV, run `make -C infra render ENV=<env>` to "
             "generate the rendered Lithops config."
         )
-
-from gri_tile_pipeline.config import PipelineConfig
-from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
-from gri_tile_pipeline.tracking import JobTracker
-from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
-
 
 # Historical average prediction duration (seconds)
 AVG_PREDICT_DURATION = 180

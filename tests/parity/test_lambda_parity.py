@@ -41,7 +41,7 @@ for p in (str(REPO_ROOT), str(REPO_ROOT / "gri_tile_loaders")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from tests.constants import GOLDEN_DIR, GOLDEN_TILES, MODEL_DIR
+from tests.constants import GOLDEN_DIR, MODEL_DIR
 from tests.parity.metrics import aggregate_golden_report, compare_predictions
 
 
@@ -143,7 +143,6 @@ def _download_prediction(dest: str, year: int, x_tile: int, y_tile: int) -> np.n
 def _invoke_lambda_for_tiles(year: int, dest: str) -> dict[str, np.ndarray]:
     """Map the 3 golden tiles through the deployed predict Lambda."""
     import yaml
-    import lithops
     from lithops import FunctionExecutor
 
     # Mirror the import path used by scripts/predict_lambda_smoke.py so Lithops

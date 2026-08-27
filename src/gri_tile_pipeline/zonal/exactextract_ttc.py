@@ -5,11 +5,13 @@ Ported from reference ``tree_cover_indicator.py``.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 import numpy as np
-import pandas as pd
 from loguru import logger
+
+if TYPE_CHECKING:
+    import geopandas as gpd
 
 
 def compute_ttc(

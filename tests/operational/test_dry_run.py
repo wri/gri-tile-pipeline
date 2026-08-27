@@ -1,6 +1,5 @@
 """Dry-run tests: commands with --dry-run should not perform actual work."""
 
-import os
 
 import pytest
 

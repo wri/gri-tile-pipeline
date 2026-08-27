@@ -43,7 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Re-use the known-tile dictionary from the smoke script to avoid duplication.
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
-from predict_lambda_smoke import KNOWN_TILES, _check_ard  # noqa: E402
+from predict_lambda_smoke import KNOWN_TILES, _check_ard
 
 TTC_BUCKET_REGION = "us-east-1"
 
@@ -69,7 +69,7 @@ def _load_lithops_cfg(env: str) -> tuple[dict, str]:
 def _pick_tiles(n: int, extra_labels: list[str] | None) -> list[dict]:
     labels = list(KNOWN_TILES.keys())
     if extra_labels:
-        labels = extra_labels + [l for l in labels if l not in extra_labels]
+        labels = extra_labels + [label for label in labels if label not in extra_labels]
     # Cycle through the pool if n exceeds unique tiles — intentional: repeats
     # force warm starts so we observe both cold and warm invocation cost.
     tiles: list[dict] = []
@@ -92,7 +92,6 @@ def _submit_and_time(
     runtime: str,
 ) -> list[dict]:
     import importlib
-    import lithops
     from lithops import FunctionExecutor
 
     # Both paths are required: src/ for `lithops_workers`, repo root for

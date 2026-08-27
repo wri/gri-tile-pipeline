@@ -81,6 +81,16 @@ members = ["packages/gri-tile-loaders"]
 [tool.uv.sources]
 gri-tile-loaders = { workspace = true }
 
+[tool.ruff.lint.per-file-ignores]
+# sys.path is mutated before these imports so they resolve at runtime; the
+# ordering is required, not accidental.
+"scripts/run_missing_predictions.py" = ["E402"]
+"scripts/tile_parity_report.py" = ["E402"]
+"scripts/predict_lambda_benchmark.py" = ["E402"]
+"src/gri_tile_pipeline/steps/predict.py" = ["E402"]
+"tests/parity/generate_report.py" = ["E402"]
+"tests/parity/test_lambda_parity.py" = ["E402"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

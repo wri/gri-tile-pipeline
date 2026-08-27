@@ -10,7 +10,6 @@ Supports two input modes:
 
 from __future__ import annotations
 
-import csv as csv_mod
 import os
 import tempfile
 from collections import Counter
@@ -511,7 +510,7 @@ def run_project_pipeline(
     years_needed = sorted(year_counts.keys())
 
     # ── Step 2: Report TTC coverage ──
-    logger.info(f"Step 2/7: TTC coverage report")
+    logger.info("Step 2/7: TTC coverage report")
     logger.info(
         f"  Source: {label} ({meta['country']}, {meta['framework_key']})"
     )

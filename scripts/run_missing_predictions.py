@@ -156,7 +156,7 @@ def main():
             pred_key = prediction_key(t["year"], t["X_tile"], t["Y_tile"])
             local_tif = os.path.join(args.output_dir, pred_key)
             print(f"[{i}/{len(tiles)}] {tag} year={t['year']}")
-            print(f"  ARD keys to download:")
+            print("  ARD keys to download:")
             for key in raw_ard_keys(t["year"], t["X_tile"], t["Y_tile"]):
                 print(f"    s3://{args.bucket}/{key}")
             print(f"  Output: {local_tif}")
@@ -260,7 +260,6 @@ def main():
 
         # Also print a single combined command if multiple tiles
         if len(successes) > 1:
-            tiles_dir = os.path.join(args.output_dir)
             print("Or sync the entire output directory:")
             # Find common year prefix
             years = sorted(set(s["year"] for s in successes))

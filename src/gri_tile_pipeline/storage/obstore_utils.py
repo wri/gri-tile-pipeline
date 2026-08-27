@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import Union
 
 import obstore as obs
-from obstore.store import LocalStore, from_url
+from obstore.store import LocalStore
 
 def make_s3_store(
     bucket: str,

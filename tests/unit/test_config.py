@@ -1,17 +1,10 @@
 """Unit tests for config.py."""
 
-import tempfile
 import os
 
-import pytest
 
 from gri_tile_pipeline.config import (
-    DownloadConfig,
-    LithopsConfig,
     PipelineConfig,
-    PredictConfig,
-    S1RTCConfig,
-    ZonalConfig,
     load_config,
 )
 

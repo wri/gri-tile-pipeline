@@ -52,7 +52,7 @@ def test_prediction_parity_baseline():
     w = min(ref.shape[1], ours.shape[1])
     stats = compare_predictions(ours[:h, :w], ref[:h, :w])
 
-    print(f"\n--- Parity Results ---")
+    print("\n--- Parity Results ---")
     for k, v in stats.items():
         if isinstance(v, float):
             print(f"  {k}: {v:.4f}")

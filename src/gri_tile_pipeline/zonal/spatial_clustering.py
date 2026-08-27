@@ -8,10 +8,13 @@ building enormous mosaics for geographically scattered projects.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
 import pandas as pd
 from loguru import logger
+
+if TYPE_CHECKING:
+    import geopandas as gpd
 
 
 class UnionFind:

@@ -92,7 +92,6 @@ def _invoke_predict(
     Returns wall-clock seconds (cold-start + inference + write) as measured
     from submission to result retrieval.
     """
-    import lithops
     from lithops import FunctionExecutor
 
     with open(predict_cfg_path) as f:
