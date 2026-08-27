@@ -10,10 +10,9 @@ import os
 import tempfile
 from typing import List
 
-import numpy as np
 import pandas as pd
 from loguru import logger
-from shapely.geometry import box, shape
+from shapely.geometry import box
 
 import obstore as obs
 

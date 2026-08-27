@@ -14,8 +14,11 @@ import csv as csv_mod
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from gri_shared_library.os_tools import get_project_root_dir
 
 from loguru import logger
+
+PROJECT_ROOT_DIR = get_project_root_dir()
 
 
 @dataclass
@@ -120,6 +123,7 @@ def resolve_to_tiles(
 
     if has_filter:
         geoparquet = geoparquet or "temp/tm.geoparquet"
+        geoparquet = os.path.join(PROJECT_ROOT_DIR, geoparquet)
         return _resolve_by_filter(
             geoparquet, cfg,
             year=year,
@@ -187,9 +191,11 @@ def _resolve_by_filter(
         framework_keys=framework_keys,
         year_override=year,
     )
+    lookup_parquet = cfg.zonal.lookup_parquet or cfg.parquet_path
+    lookup_parquet = os.path.join(PROJECT_ROOT_DIR, lookup_parquet)
     tiles = identify_tiles_for_polygons(
         gdf,
-        lookup_parquet=cfg.zonal.lookup_parquet or cfg.parquet_path,
+        lookup_parquet=lookup_parquet,
         lookup_csv=cfg.zonal.lookup_csv,
     )
     logger.info(f"Resolved {len(tiles)} tiles from {meta['n_polygons']} polygons (filter={meta['label']})")

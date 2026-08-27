@@ -10,10 +10,12 @@ Matches each row's ``poly_uuid`` against the ids returned by
 from __future__ import annotations
 
 import math
+import pandas as pd
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Literal, Optional
 
+from gri_shared_library.constants import FORCE_NULL_PATCH_KEYWORD
 from loguru import logger
 
 from gri_tile_pipeline.terramatch.client import TMApiError, TMClient
@@ -73,8 +75,6 @@ class PatchOutcome:
 
 def load_results(csv_path: str | Path) -> tuple[list[dict], list[str]]:
     """Return (rows, column_names) from *csv_path*."""
-    import pandas as pd
-
     df = pd.read_csv(csv_path)
     return df.to_dict(orient="records"), list(df.columns)
 
@@ -136,11 +136,15 @@ def build_indicator(row: dict, spec: IndicatorSpec) -> dict:
             f"no year available (pass --year or include {spec.year_column!r} column)"
         )
 
-    percent = _coerce_float(row.get(spec.percent_column))
-    if percent is None:
-        raise ValueError(
-            f"row missing numeric {spec.percent_column!r} column"
-        )
+    if (isinstance(row.get(spec.percent_column), str) and
+            row.get(spec.percent_column).upper() == FORCE_NULL_PATCH_KEYWORD.upper()):
+        percent = None
+    else:
+        percent = _coerce_float(row.get(spec.percent_column))
+        if percent is None:
+            raise ValueError(
+                f"row missing numeric {spec.percent_column!r} column"
+            )
 
     indicator: dict = {
         "indicatorSlug": spec.slug,
@@ -185,20 +189,26 @@ def run_patch(
         raw_uuid = row.get("poly_uuid")
         poly_uuid = "" if raw_uuid is None else str(raw_uuid)
         if not poly_uuid:
+            logger.error("Row has no poly_uuid — skipping (status=error)")
             outcomes.append(PatchOutcome(
                 poly_uuid="", polygon_id=None, status="error",
                 message="row has no poly_uuid",
             ))
             continue
         if poly_uuid not in known_ids:
+            logger.warning(
+                f"{poly_uuid}: not returned by /sitePolygons for project "
+                f"{project_id} — marking unmatched"
+            )
             outcomes.append(PatchOutcome(
-                poly_uuid=poly_uuid, polygon_id=None, status="unmatched",
+                poly_uuid=poly_uuid, polygon_id=poly_uuid, status="unmatched",
                 message="not returned by /sitePolygons for this project",
             ))
             continue
         try:
             indicator = build_indicator(row, spec)
         except ValueError as e:
+            logger.error(f"{poly_uuid}: skipping — {e}")
             outcomes.append(PatchOutcome(
                 poly_uuid=poly_uuid, polygon_id=poly_uuid,
                 status="error", message=str(e),

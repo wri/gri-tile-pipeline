@@ -1,7 +1,6 @@
 """Unit tests for preprocessing/temporal_resampling.py."""
 
 import numpy as np
-import pytest
 
 from gri_tile_pipeline.preprocessing.temporal_resampling import resample_to_biweekly
 

@@ -1,0 +1,54 @@
+name: Run Tests
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    strategy:
+      max-parallel: 4
+      matrix:
+        python-version: ["3.12"]
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Install UV
+      - name: Install UV
+        uses: astral-sh/setup-uv@v6
+
+      # Step 3: Install dependencies
+      - name: Sync dependencies
+        env:
+          KENNC_REPO_PAT: ${{ secrets.KENNC_REPO_PAT }}
+        run: |
+          git config --global url."https://${KENNC_REPO_PAT}@github.com/".insteadOf "https://github.com/"
+          uv sync --locked --all-extras --dev
+
+      # Step 4: Install Linux dependencies (GDAL)
+      # - Disable man-db trigger (rebuilds man pages after every install; slow and useless in CI)
+      # - Use --no-install-recommends to skip optional GDAL plugins we don't need
+      # - Cache .deb files across runs so we don't re-download on every PR
+      - name: Install Linux dependencies
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: gdal-bin libgdal-dev
+          version: 1.0
+          execute_install_scripts: true
+
+      # Step 5: Run tests
+      - name: Run Tests
+        run: |
+          if [ -f "secrets.yaml" ]; then
+            echo "Aborting tests to avoid unintended execution.."
+            exit 1
+          fi
+          uv run pytest tests/

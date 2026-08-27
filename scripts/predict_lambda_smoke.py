@@ -4,7 +4,7 @@ Runs a single prediction through the ``ttc-predict-dev`` Lambda via Lithops,
 then validates the resulting ``FINAL.tif`` has a sensible shape, dtype, and
 content distribution. Intended as the first thing to run after
 ``make -C infra build-all ENV=land-research`` to confirm the runtime image,
-IAM role, and cross-account ``tof-output`` write are all wired correctly.
+IAM role, and bucket writes are all wired correctly.
 
 Usage (from repo root, after ``aws sso login --profile resto-user``)::
 
@@ -92,7 +92,6 @@ def _invoke_predict(
     Returns wall-clock seconds (cold-start + inference + write) as measured
     from submission to result retrieval.
     """
-    import lithops
     from lithops import FunctionExecutor
 
     with open(predict_cfg_path) as f:
@@ -100,12 +99,12 @@ def _invoke_predict(
     lithops_cfg.setdefault("aws_lambda", {})["runtime"] = runtime
 
     # Import the same thin worker shim the production code uses so we test
-    # the real call path (not a direct import of loaders.predict_tile.run).
+    # the real call path (not a direct import of gri_tile_loaders.predict_tile.run).
     import importlib
     import sys as _sys
 
     # Put the repo root and src/ on sys.path so Lithops' include_modules can
-    # locate and bundle `loaders` (at repo root) and `lithops_workers` (in src/).
+    # locate and bundle `gri_tile_loaders` (at repo root) and `lithops_workers` (in src/).
     # Without this, `uv run python scripts/...` puts only scripts/ on sys.path.
     repo_root = str(Path(__file__).resolve().parents[1])
     src_dir = str(Path(__file__).resolve().parents[1] / "src")
@@ -120,7 +119,7 @@ def _invoke_predict(
     t0 = time.time()
     future = fexec.call_async(
         lithops_workers.run_predict, (kwargs,),
-        include_modules=["loaders", "lithops_workers"],
+        include_modules=["gri_tile_loaders", "lithops_workers"],
     )
     # get_result blocks and raises if the worker raised. Lithops 3.6.1
     # moved the timeout kwarg off ResponseFuture.result onto the executor,
@@ -194,7 +193,7 @@ def main() -> int:
     )
     ap.add_argument("--tile", default="1000X871Y", help="Tile label (e.g. 1000X871Y).")
     ap.add_argument("--year", type=int, default=2023, help="Prediction year.")
-    ap.add_argument("--dest", default="s3://tof-output", help="S3 URI or local path for ARD + output TIF.")
+    ap.add_argument("--dest", default="s3://wri-restoration-geodata-ttc", help="S3 URI or local path for ARD + output TIF.")
     ap.add_argument("--memory-mb", type=int, default=6144, help="Lambda memory.")
     ap.add_argument("--timeout", type=int, default=900, help="Client-side wait timeout (sec); should be >= aws_lambda.runtime_timeout.")
     ap.add_argument("--runtime", default="ttc-predict-dev", help="Lithops runtime name.")

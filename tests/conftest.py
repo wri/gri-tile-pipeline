@@ -8,55 +8,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-# ---------------------------------------------------------------------------
-# Data paths
-# ---------------------------------------------------------------------------
-
-ARD_DIR = REPO_ROOT / "example" / "raw_v2"
-REFERENCE_TIF = REPO_ROOT / "example" / "1000X871Y_FINAL.tif"
-MODEL_DIR = REPO_ROOT / "models"
-
-GOLDEN_DIR = REPO_ROOT / "example" / "golden"
-GOLDEN_RAW = GOLDEN_DIR / "raw"
-GOLDEN_TILES = ["1000X798Y", "1000X799Y", "1000X800Y"]
-
-# ---------------------------------------------------------------------------
-# Skip conditions
-# ---------------------------------------------------------------------------
-
-has_ard = pytest.mark.skipif(
-    not ARD_DIR.is_dir(),
-    reason=f"ARD directory not found: {ARD_DIR}",
-)
-has_reference = pytest.mark.skipif(
-    not REFERENCE_TIF.is_file(),
-    reason=f"Reference TIF not found: {REFERENCE_TIF}",
-)
-has_model = pytest.mark.skipif(
-    not (MODEL_DIR / "predict_graph-172.pb").is_file(),
-    reason=f"Model not found: {MODEL_DIR / 'predict_graph-172.pb'}",
-)
-
-_tf_available = False
-try:
-    import tensorflow  # noqa: F401
-    _tf_available = True
-except ImportError:
-    pass
-
-has_tf = pytest.mark.skipif(not _tf_available, reason="TensorFlow not installed")
-
-has_golden = pytest.mark.skipif(
-    not GOLDEN_DIR.is_dir(),
-    reason=f"Golden test data not found: {GOLDEN_DIR}",
-)
+from gri_shared_library.constants import TTC_TILEDB_FILEPATH, TERRAMATCH_GEOPARQUET_FILEPATH
+from gri_shared_library.os_tools import remove_file
+from gri_shared_library.productivity_tools import (download_ttc_test_data)
+from gri_shared_library.geoparquet_tools import clear_ttc_for_test_projects, thin_tm_geoparquet_to_test_projects
+from tests.constants import ARD_DIR, REFERENCE_TIF, MODEL_DIR
 
 # ---------------------------------------------------------------------------
 # Fixtures — paths
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def ard_dir() -> Path:
@@ -117,3 +77,46 @@ def sample_feature_stack() -> np.ndarray:
 def sample_dates() -> np.ndarray:
     """24 evenly-spaced day-of-year values."""
     return np.linspace(0, 345, 24).astype(np.float64)
+
+
+def _is_controller(config):
+    # pytest-xdist sets `workerinput` on each worker process. The controller
+    # (and any non-distributed run, e.g. without -n) does NOT have it, so this
+    # is True exactly once per test session, regardless of worker count.
+    return not hasattr(config, "workerinput")
+
+
+def _setup_test_data():
+    if os.getenv("AWS_PROFILE"):
+        # pre-execution cleanup
+        remove_file(TTC_TILEDB_FILEPATH)
+        remove_file(TERRAMATCH_GEOPARQUET_FILEPATH)
+        # Prepare test projects
+        download_ttc_test_data()
+        thin_tm_geoparquet_to_test_projects()
+        clear_ttc_for_test_projects()
+        assert os.path.exists(TTC_TILEDB_FILEPATH)
+        assert os.path.exists(TERRAMATCH_GEOPARQUET_FILEPATH)
+
+
+def _teardown_test_data():
+    if os.getenv("AWS_PROFILE"):
+        # post-execution cleanup
+        remove_file(TTC_TILEDB_FILEPATH)
+        remove_file(TERRAMATCH_GEOPARQUET_FILEPATH)
+        assert not os.path.exists(TTC_TILEDB_FILEPATH)
+        assert not os.path.exists(TERRAMATCH_GEOPARQUET_FILEPATH)
+
+
+def pytest_configure(config):
+    # Runs on the controller before any worker is spawned -> setup happens once,
+    # and the data files are on disk before the workers start
+    # collecting/running.
+    if _is_controller(config):
+        _setup_test_data()
+
+
+def pytest_unconfigure(config):
+    # Runs on the controller after all workers have finished -> teardown once.
+    if _is_controller(config):
+        _teardown_test_data()

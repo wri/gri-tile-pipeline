@@ -5,18 +5,17 @@ variable "role_name" {
 }
 
 variable "output_bucket_name" {
-  description = "Pipeline output bucket in the wri account."
+  description = "Dedicated TTC pipeline output bucket (ARD + predictions), in this account, us-east-1."
   type        = string
-  default     = "tof-output"
+  default     = "wri-restoration-geodata-ttc"
 }
 
-variable "output_bucket_prefixes" {
-  description = "Restrict the cross-account grant to these prefixes. Empty list = whole bucket."
+variable "additional_output_bucket_arns" {
+  description = "Extra output bucket ARNs the Lambda role can write to. gri-prefect-orchestration's sentinel-batch-flow writes into wri-restoration-geodata; without that ARN here, Lambda PUTs return 403 and Lithops marks the jobs failed silently."
   type        = list(string)
-  # Current pipeline writes:
-  #   {year}/raw/{X}/{Y}/raw/...   (ARD)
-  #   {year}/tiles/{X}/{Y}/...     (predictions)
-  default = []
+  default = [
+    "arn:aws:s3:::wri-restoration-geodata",
+  ]
 }
 
 variable "tags" {

@@ -39,10 +39,10 @@ import uuid
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-# Repo root for `import loaders.predict_tile` (package form).
-# loaders/ so `import predict_tile` works (used by tests/parity/generate_report.py).
+# Repo root for `import gri_tile_loaders.predict_tile` (package form).
+# gri_tile_loaders/ so `import predict_tile` works (used by tests/parity/generate_report.py).
 # tests/ so the parity helpers import cleanly.
-for p in (REPO_ROOT, REPO_ROOT / "loaders", REPO_ROOT / "tests"):
+for p in (REPO_ROOT, REPO_ROOT / "gri_tile_loaders", REPO_ROOT / "tests"):
     sp = str(p)
     if sp not in sys.path:
         sys.path.insert(0, sp)
@@ -53,7 +53,7 @@ from loguru import logger
 
 _TILE_RE = re.compile(r"^(\d+)X(\d+)Y$")
 
-# ARD keys in tof-output have drifted over time across two orthogonal axes:
+# ARD keys in the predictions bucket have drifted over time across two orthogonal axes:
 #   1. bucket prefix: <root> vs 'dev-ttc-lithops-usw2/' (and maybe others)
 #   2. base pattern: canonical '{year}/raw/{x}/{y}/raw/...' vs alternate
 #      '{year}/{x}/{y}/raw/...' (the first 'raw/' segment is missing).
@@ -196,7 +196,7 @@ def _verify_prediction_exists(store, year: int, x: int, y: int) -> str:
 
 def _load_ard(store, resolved_keys: dict[str, str]) -> dict[str, np.ndarray]:
     """Download the six ARD files from their resolved S3 keys."""
-    from loaders.predict_tile import _load_hkl
+    from gri_tile_loaders.predict_tile import _load_hkl
 
     logger.info(f"Loading ARD from S3 ({len(resolved_keys)} sources)")
     arrays = {src: _load_hkl(store, key) for src, key in resolved_keys.items()}
@@ -226,7 +226,7 @@ def _load_existing_prediction(store, year: int, x: int, y: int) -> np.ndarray:
 def _run_local_predict(ard: dict[str, np.ndarray], model_dir: Path, seed: int) -> dict:
     """Run predict_tile_from_arrays locally. Returns {pred, execution} where
     ``execution`` is a mode-tagged dict consumed by the report builder."""
-    from loaders.predict_tile import predict_tile_from_arrays
+    from gri_tile_loaders.predict_tile import predict_tile_from_arrays
 
     logger.info(f"Running local prediction with seed={seed} model_dir={model_dir}")
     t0 = time.time()
@@ -281,7 +281,7 @@ def _invoke_lambda(
     from lithops import FunctionExecutor
 
     # Lithops' include_modules imports these client-side to bundle, so we need
-    # both src/ (for lithops_workers) and the repo root (for `loaders` as a package).
+    # both src/ (for lithops_workers) and the repo root (for `gri_tile_loaders` as a package).
     for p in (REPO_ROOT, REPO_ROOT / "src"):
         sp = str(p)
         if sp not in sys.path:
@@ -320,7 +320,7 @@ def _invoke_lambda(
     t0 = time.time()
     fut = fexec.call_async(
         lithops_workers.run_predict, (kwargs,),
-        include_modules=["loaders", "lithops_workers"],
+        include_modules=["gri_tile_loaders", "lithops_workers"],
     )
     fexec.get_result([fut], timeout=timeout_sec)
     wall = time.time() - t0
@@ -502,8 +502,8 @@ def main() -> int:
                     help="Year (matches the S3 key prefix, e.g. 2025).")
     ap.add_argument("--mode", choices=("local", "lambda"), default="local",
                     help="Where to run the new prediction. Default: local.")
-    ap.add_argument("--dest", default="s3://tof-output",
-                    help="S3 bucket URI where ARD + FINAL.tif live. Default: s3://tof-output")
+    ap.add_argument("--dest", default="s3://wri-restoration-geodata-ttc",
+                    help="S3 bucket URI where ARD + FINAL.tif live. Default: s3://wri-restoration-geodata-ttc")
     ap.add_argument("--region", default="us-east-1",
                     help="AWS region for the bucket.")
     ap.add_argument(

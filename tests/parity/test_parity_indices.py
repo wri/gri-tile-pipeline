@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from gri_tile_pipeline.preprocessing.indices import bi, evi, grndvi, make_indices, msavi2
+from gri_tile_pipeline.preprocessing.indices import bi, evi, grndvi, msavi2
 
 pytestmark = pytest.mark.parity
 

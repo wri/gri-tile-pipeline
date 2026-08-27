@@ -16,8 +16,9 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
+from gri_tile_pipeline.duckdb_utils import connect_with_spatial
+from gri_tile_pipeline.tiles.csv_io import write_tiles_csv
 
 _FORBIDDEN_SQL = re.compile(
     r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|ATTACH|COPY|PRAGMA)\b",
@@ -34,9 +35,6 @@ def _validate_where_sql(where_sql: str) -> None:
             "--where clause rejected: contains DDL/DML keyword "
             "(DROP, DELETE, INSERT, UPDATE, ALTER, CREATE, TRUNCATE, GRANT, REVOKE, ATTACH, COPY, PRAGMA)"
         )
-
-from gri_tile_pipeline.duckdb_utils import connect_with_spatial
-from gri_tile_pipeline.tiles.csv_io import write_tiles_csv
 
 
 HALF_TILE = 1.0 / 36
@@ -74,6 +72,12 @@ def _build_filter(
     idx = 2
     poly_uuids = poly_uuids or []
     cohorts = cohorts or []
+
+    # precautionary remove leading/trailing spaces from strings in lists
+    project_ids = [s.strip() for s in project_ids]
+    short_names = [s.strip() for s in short_names]
+    framework_keys = [s.strip() for s in framework_keys]
+    poly_uuids = [s.strip() for s in poly_uuids]
 
     if input_csv:
         con.execute(
@@ -472,7 +476,7 @@ def generate_report(
     where_sql: str | None = None,
     geoparquet: str = "temp/tm.geoparquet",
     tiledb: str = "data/tiledb.parquet",
-    bucket: str = "tof-output",
+    bucket: str = "wri-restoration-geodata-ttc",
     region: str = "us-east-1",
     check_type: str = "predictions",
     skip_s3: bool = False,

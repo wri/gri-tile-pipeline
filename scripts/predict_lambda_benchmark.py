@@ -43,9 +43,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Re-use the known-tile dictionary from the smoke script to avoid duplication.
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
-from predict_lambda_smoke import KNOWN_TILES, _check_ard  # noqa: E402
+from predict_lambda_smoke import KNOWN_TILES, _check_ard
 
-TOF_OUTPUT_REGION = "us-east-1"
+TTC_BUCKET_REGION = "us-east-1"
 
 
 def _git_sha() -> str:
@@ -69,7 +69,7 @@ def _load_lithops_cfg(env: str) -> tuple[dict, str]:
 def _pick_tiles(n: int, extra_labels: list[str] | None) -> list[dict]:
     labels = list(KNOWN_TILES.keys())
     if extra_labels:
-        labels = extra_labels + [l for l in labels if l not in extra_labels]
+        labels = extra_labels + [label for label in labels if label not in extra_labels]
     # Cycle through the pool if n exceeds unique tiles — intentional: repeats
     # force warm starts so we observe both cold and warm invocation cost.
     tiles: list[dict] = []
@@ -92,11 +92,10 @@ def _submit_and_time(
     runtime: str,
 ) -> list[dict]:
     import importlib
-    import lithops
     from lithops import FunctionExecutor
 
     # Both paths are required: src/ for `lithops_workers`, repo root for
-    # `loaders` (top-level package not under src/). Matches predict_lambda_smoke.py.
+    # `gri_tile_loaders` (top-level package not under src/). Matches predict_lambda_smoke.py.
     repo_root = str(REPO_ROOT)
     src_dir = str(REPO_ROOT / "src")
     for p in (repo_root, src_dir):
@@ -124,7 +123,7 @@ def _submit_and_time(
         t_sub = time.time()
         future = fexec.call_async(
             lithops_workers.run_predict, (kwargs,),
-            include_modules=["loaders", "lithops_workers"],
+            include_modules=["gri_tile_loaders", "lithops_workers"],
         )
         submissions.append((tile, t_sub, future))
 
@@ -152,7 +151,7 @@ def _submit_and_time(
                     lambda_duration = float(stats[k])
                     break
             # Phase timings come from the Lambda return dict (see
-            # loaders/predict_tile.py::run). Only present when the worker
+            # gri_tile_loaders/predict_tile.py::run). Only present when the worker
             # completed without raising.
             if isinstance(result, dict):
                 pt = result.get("phase_timings") or {}
@@ -202,7 +201,7 @@ def _summarize(rows: list[dict], lambda_region: str, max_workers: int, memory_mb
     total_elapsed = max(r["complete_s"] for r in ok)
     throughput = len(ok) / (total_elapsed / 60) if total_elapsed else 0.0
 
-    cross_region = lambda_region != TOF_OUTPUT_REGION
+    cross_region = lambda_region != TTC_BUCKET_REGION
 
     def _p(xs: list[float], q: float) -> float:
         if not xs:
@@ -215,7 +214,7 @@ def _summarize(rows: list[dict], lambda_region: str, max_workers: int, memory_mb
     print("[bench] Summary")
     print(f"    invocations:         {len(rows)} ({len(ok)} ok, {len(rows) - len(ok)} failed)")
     print(f"    lambda region:       {lambda_region}")
-    print(f"    tof-output region:   {TOF_OUTPUT_REGION}")
+    print(f"    ttc bucket region:   {TTC_BUCKET_REGION}")
     print(f"    cross-region egress: {'YES (paying for it)' if cross_region else 'no (co-located)'}")
     print(f"    runtime memory:      {memory_mb} MB")
     print(f"    max workers:         {max_workers}")
@@ -271,7 +270,7 @@ def main() -> int:
     parser.add_argument("--env", default=os.environ.get("LITHOPS_ENV", "land-research"))
     parser.add_argument("--tiles", type=int, default=20, help="Number of invocations to submit")
     parser.add_argument("--year", type=int, default=2023)
-    parser.add_argument("--dest", default="s3://tof-output")
+    parser.add_argument("--dest", default="s3://wri-restoration-geodata-ttc")
     parser.add_argument("--memory-mb", type=int, default=6144)
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--runtime", default="ttc-predict-dev")

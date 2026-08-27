@@ -7,10 +7,13 @@ terraform {
     }
   }
 
-  # Remote state; backend values come from `terraform init -backend-config=...`
-  # or the bootstrap stack's `backend_snippet` output.
+  # Remote state on the shared land-research state bucket.
+  # Bucket / region / lock table come from `terraform init -backend-config=...`:
+  #   bucket         = wri-restoration-terraform-state-lr
+  #   region         = us-east-1
+  #   dynamodb_table = terraform-state-lock
   backend "s3" {
-    key     = "envs/land-research/terraform.tfstate"
+    key     = "gri-tile-pipeline/lr.tfstate"
     encrypt = true
   }
 }
@@ -43,7 +46,7 @@ provider "aws" {
   }
 }
 
-# Same account, us-east-1 (predict Lambda co-locates with tof-output).
+# Same account, us-east-1 (predict Lambda co-locates with the TTC data bucket).
 provider "aws" {
   alias  = "use1"
   region = "us-east-1"

@@ -76,8 +76,8 @@ def test_predict_parity():
           f"mean={ref[ref != 255].mean():.1f}")
 
     # Run our prediction
-    sys.path.insert(0, os.path.join(REPO_ROOT, "loaders"))
-    from loaders.predict_tile import run_local
+    sys.path.insert(0, os.path.join(REPO_ROOT, "gri_tile_loaders"))
+    from gri_tile_loaders.predict_tile import run_local
 
     os.makedirs(os.path.dirname(OUTPUT_TIF), exist_ok=True)
     ours = run_local(
@@ -108,7 +108,7 @@ def test_predict_parity():
     pct5 = stats.get("pct_within_5", 0)
     corr = stats.get("correlation", 0)
 
-    print(f"\n--- Quality Gates ---")
+    print("\n--- Quality Gates ---")
     print(f"  >99% within 1 DN:  {'PASS' if pct1 > 99 else 'FAIL'} ({pct1:.1f}%)")
     print(f"  >99% within 5 DN:  {'PASS' if pct5 > 99 else 'FAIL'} ({pct5:.1f}%)")
     print(f"  Correlation > 0.99: {'PASS' if corr > 0.99 else 'FAIL'} ({corr:.4f})")
@@ -146,6 +146,7 @@ def test_preprocessing_only():
     s2_dates = hkl.load(f"{ARD_DIR}/misc/s2_dates_1000X871Y.hkl")
 
     T, H, W = s2_10.shape[:3]
+    dem = sk_resize(dem, (H, W), order=1, preserve_range=True).astype(np.float32)
     print(f"S2_10: {s2_10.shape}, S2_20: {s2_20.shape}, S1: {s1.shape}, DEM: {dem.shape}")
     print(f"S2 dates: {s2_dates}")
 
@@ -223,7 +224,7 @@ def test_preprocessing_only():
     feature[-1, :, :, 13:] = np.median(idx_12, axis=0)
 
     print(f"\nFeature stack: {feature.shape}")
-    print(f"Channel ranges vs normalization bounds:")
+    print("Channel ranges vs normalization bounds:")
     for ch in range(17):
         ch_data = feature[:, :, :, ch]
         print(f"  ch{ch:2d}: [{ch_data.min():.4f}, {ch_data.max():.4f}] "

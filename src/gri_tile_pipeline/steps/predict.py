@@ -12,6 +12,11 @@ from typing import Any, Dict, List, Tuple
 import yaml
 from loguru import logger
 
+from gri_tile_pipeline.config import PipelineConfig
+from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
+from gri_tile_pipeline.tracking import JobTracker
+from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
+
 
 def _require_predict_config(path: str) -> None:
     """Fail loud before fanning out if the Lithops predict config is unusable.
@@ -35,12 +40,6 @@ def _require_predict_config(path: str) -> None:
             "If you set LITHOPS_ENV, run `make -C infra render ENV=<env>` to "
             "generate the rendered Lithops config."
         )
-
-from gri_tile_pipeline.config import PipelineConfig
-from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
-from gri_tile_pipeline.tracking import JobTracker
-from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
-
 
 # Historical average prediction duration (seconds)
 AVG_PREDICT_DURATION = 180
@@ -128,7 +127,7 @@ def run_predict(
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures.append((
             RetryingFuture(
-                fexec.call_async(_run_predict, (kw,), include_modules=["loaders", "lithops_workers"]),
+                fexec.call_async(_run_predict, (kw,), include_modules=["gri_tile_loaders", "lithops_workers"]),
                 _run_predict, (kw,), retries=retries,
             ),
             "PREDICT", "us-west-2", tile_info,
@@ -162,7 +161,7 @@ def run_predict_local(
 
     Returns the :class:`JobTracker` with all results.
     """
-    from loaders.predict_tile import run as predict_run
+    from gri_tile_loaders.predict_tile import run as predict_run
 
     from gri_tile_pipeline.execution import run_local_tasks
 
