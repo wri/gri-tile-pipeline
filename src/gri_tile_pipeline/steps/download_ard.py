@@ -216,9 +216,8 @@ def run_download_ard(
 # Local execution
 # ------------------------------------
 
-def _build_base_kwargs(tiles: list[dict[str, Any]], dest: str, debug: bool = False):
+def _build_base_kwargs(tiles: list[dict[str, Any]], dest: str, debug: bool = False) -> list[dict[str, Any]]:
     """Build list of per-tile keyword dicts for workers."""
-    -> list[dict[str, Any]]
     return [
         {
             "year": t["year"],
