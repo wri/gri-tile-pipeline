@@ -22,20 +22,20 @@ from pathlib import Path
 
 import rasterio
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-IMAGE_TAG = "ttc-predict-local"
-IN_CONTAINER_SCRIPT = REPO_ROOT / "scripts" / "_gate_a_predict_inside_container.py"
-DOCKERFILE = REPO_ROOT / "docker" / "PredictDockerfile"
-GOLDEN_DIR = REPO_ROOT / "example" / "golden"
-MODELS_DIR = REPO_ROOT / "models"
-LOADERS_DIR = REPO_ROOT / "gri_tile_loaders"
+REPO_ROOT: Path = Path(__file__).resolve().parent.parent
+IMAGE_TAG: str = "ttc-predict-local"
+IN_CONTAINER_SCRIPT: Path = REPO_ROOT / "scripts" / "_gate_a_predict_inside_container.py"
+DOCKERFILE: Path = REPO_ROOT / "docker" / "PredictDockerfile"
+GOLDEN_DIR: Path = REPO_ROOT / "example" / "golden"
+MODELS_DIR: Path = REPO_ROOT / "models"
+LOADERS_DIR: Path = REPO_ROOT / "gri_tile_loaders"
 
 # Parity thresholds (same as tests/parity/test_golden_parity.py baseline).
 # Gate A uses the baseline tier — a green baseline means the container's
 # inference is wired correctly, regardless of whether the improved-tier
 # parity tier currently passes.
-PCT_WITHIN_10_MIN = 75.0
-PCT_WITHIN_1_MIN = 40.0
+PCT_WITHIN_10_MIN: float = 75.0
+PCT_WITHIN_1_MIN: float = 40.0
 
 
 def _build_image() -> None:

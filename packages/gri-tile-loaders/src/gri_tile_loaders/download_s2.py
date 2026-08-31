@@ -35,21 +35,21 @@ from gri_tile_loaders.shared import make_bbox, obstore_put_hkl
 # ----------------------------
 # Configuration
 # ----------------------------
-EARTH_SEARCH_V1 = "https://earth-search.aws.element84.com/v1"
-S2_COLLECTION = "sentinel-2-l2a"
-S2_REGION = "us-west-2"
+EARTH_SEARCH_V1: str = "https://earth-search.aws.element84.com/v1"
+S2_COLLECTION: str = "sentinel-2-l2a"
+S2_REGION: str = "us-west-2"
 
 # Band definitions - matching legacy exactly
-ASSETS_10M = ["blue", "green", "red", "nir"]  # B02, B03, B04, B08
-ASSETS_20M = ["rededge1", "rededge2", "rededge3", "nir08", "swir16", "swir22"]  # B05, B06, B07, B8A, B11, B12
-SCL_ASSET = ["scl"]
+ASSETS_10M: List[str] = ["blue", "green", "red", "nir"]  # B02, B03, B04, B08
+ASSETS_20M: List[str] = ["rededge1", "rededge2", "rededge3", "nir08", "swir16", "swir22"]  # B05, B06, B07, B8A, B11, B12
+SCL_ASSET: List[str] = ["scl"]
 
 # Cloud thresholds - matching legacy
-CLOUD_HARD_DROP = 0.50      # >50% global clouds → drop
-CLOUD_FINAL_MAX = 0.40      # Final threshold after local weighting
+CLOUD_HARD_DROP: float = 0.50      # >50% global clouds → drop
+CLOUD_FINAL_MAX: float = 0.40      # Final threshold after local weighting
 
 # SCL cloudy values - matching reference script
-SCL_CLOUDY = {0, 1, 2, 3, 7, 8, 9, 10, 11}  # All problematic pixels
+SCL_CLOUDY: set = {0, 1, 2, 3, 7, 8, 9, 10, 11}  # All problematic pixels
 
 # When the per-image bad-fraction filter (quality_threshold=0.20) would
 # drop every acquisition for a tile, keep this many cleanest instead of
@@ -58,14 +58,14 @@ SCL_CLOUDY = {0, 1, 2, 3, 7, 8, 9, 10, 11}  # All problematic pixels
 # instead of a missing tile (wrong). 3 is a compromise between
 # "enough temporal signal for the quarterly reduction" and "don't keep
 # images that are basically pure cloud".
-SCL_FALLBACK_KEEP_N = 3
+SCL_FALLBACK_KEEP_N: int = 3
 
 # Coverage requirements for quality evaluation
-MIN_COVERAGE_FRAC = 0.95  # require at least 95% bbox coverage per day/group
+MIN_COVERAGE_FRAC: float = 0.95  # require at least 95% bbox coverage per day/group
 
 # Selection caps
-MAX_SCENES_TOTAL = 24
-MAX_SCENES_PER_MONTH = 2
+MAX_SCENES_TOTAL: int = 24
+MAX_SCENES_PER_MONTH: int = 2
 
 # ----------------------------
 # Utilities
@@ -705,7 +705,7 @@ def download_sentinel2_stac(items: List, bbox: list, clean_steps: np.ndarray,
 @click.option('--max-items', type=int, default=100, help='Maximum STAC items to search')
 @click.option('--debug', is_flag=True, help='Enable debug logging')
 def main(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
-         dest: str, expansion: int, max_items: int, debug: bool):
+         dest: str, expansion: int, max_items: int, debug: bool) -> None:
     """
     Sentinel-2 L2A downloader with legacy-compatible outputs.
     Implements two-stage workflow: cloud identification → data download.

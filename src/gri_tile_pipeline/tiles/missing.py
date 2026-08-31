@@ -28,7 +28,7 @@ from gri_shared_library.constants import (
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 
 
-HALF_TILE = 1.0 / 36  # half of 1/18 degree tile size
+HALF_TILE: float = 1.0 / 36  # half of 1/18 degree tile size
 
 
 def generate_missing_tiles(
@@ -213,7 +213,7 @@ def list_polygons_missing_ttc(
     ]
 
 
-def _get_survey_year_offssets(outermost_project_phase_name):
+def _get_survey_year_offssets(outermost_project_phase_name: str | None) -> list[int]:
     """Return the list of integer offset years that apply to a project phase.
 
     A phase includes every offset up to and including itself.
@@ -239,7 +239,7 @@ def _get_survey_year_offssets(outermost_project_phase_name):
     return window_offsets[key]
 
 
-def _distinct_offset_years(outermost_project_phase_name) -> list[int]:
+def _distinct_offset_years(outermost_project_phase_name: str | None) -> list[int]:
     """Return a phase's offset years as a sorted list of distinct integers.
 
     This is what the WHERE clause matches against: distinct integer offsets.

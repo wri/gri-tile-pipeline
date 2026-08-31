@@ -19,6 +19,7 @@ Enhanced version with:
 import os
 import sys
 import argparse
+from affine import Affine
 from rasterio.session import AWSSession
 import boto3
 import rasterio as rio
@@ -87,7 +88,7 @@ def bbox2geojson(bbox: list) -> dict:
         "coordinates": [[[x1,y1],[x2,y1],[x2,y2],[x1,y2],[x1,y1]]]
     }
 
-def coverage_fraction(item, tile_bounds: tuple) -> float:
+def coverage_fraction(item: dict, tile_bounds: tuple[float, float, float, float]) -> float:
     """Compute fraction of tile area covered by the item's footprint.
 
     Returns 0.0 on error.
@@ -138,7 +139,7 @@ class DEMCache:
         return None
     
     @staticmethod
-    def save_dem_cache(bbox: list, dem_data: np.ndarray, dem_transform, dem_crs,
+    def save_dem_cache(bbox: list, dem_data: np.ndarray, dem_transform: np.ndarray, dem_crs: dict,
                        slope: np.ndarray, aspect: np.ndarray) -> None:
         """Save DEM data to cache"""
         if DEM_CACHE_DIR is None:
@@ -244,11 +245,25 @@ def fetch_copdem_for_bbox(bbox: list, buffer: float = 0.00002) -> tuple:
     
     return dem_data, dem_transform, dem_crs, slope, aspect
 
-def calculate_slope_aspect(dem: np.ndarray, transform, dem_crs) -> tuple:
+def calculate_slope_aspect(
+    dem: np.ndarray,
+    transform: Affine,
+    dem_crs: CRS | str | dict | None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Calculate slope and aspect from DEM.
 
     Properly handles geographic (lat/lon) vs projected CRS by converting
     pixel spacing to meters before computing gradients.
+
+    Args:
+        dem: DEM elevation array with shape (height, width).
+        transform: Affine transform mapping pixel coordinates to map coordinates.
+        dem_crs: DEM coordinate reference system accepted by rasterio,
+            for example a CRS object, EPSG string, PROJ string, dict, or None.
+
+    Returns:
+        Tuple of (slope, aspect), both float arrays in radians with the same
+        shape as dem.
     """
     logger.debug("Calculating slope and aspect from DEM")
 
@@ -642,7 +657,7 @@ def find_annotation_asset(item, band_or_pol: str) -> str | None:
     return None
 
 
-def get_annotation_href(item, annotation_key: str | None) -> str | None:
+def get_annotation_href(item: Any, annotation_key: str | None) -> str | None:
     """Get the annotation href from an asset key or synthetic key."""
     if annotation_key is None:
         return None
@@ -1002,7 +1017,7 @@ def get_item_geometry(item) -> tuple:
     
     return float(incidence_angle), look_direction
 
-def find_calibration_asset(item, band: str) -> str | None:
+def find_calibration_asset(item: Any, band: str) -> str | None:
     """Find the correct calibration asset name for a band.
 
     Uses polarization-aware matching to avoid returning VH calibration for VV or vice versa.
@@ -1060,8 +1075,8 @@ def process_band_with_terrain_correction(
     bounds: tuple,
     target_crs: str,
     dem_data: np.ndarray,
-    dem_transform,
-    dem_crs,
+    dem_transform: Any,
+    dem_crs: Any,
     slope: np.ndarray,
     aspect: np.ndarray,
     incidence_angle_fallback: float,
@@ -1422,7 +1437,7 @@ def composite_quarter_scenes(scene_arrays: list, method: str = 'mean') -> np.nda
 
     return composited.astype(np.uint16)
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description="Load Sentinel-1 data with terrain correction (quarterly, obstore).")
     ap.add_argument("--year", type=int, required=True)
     ap.add_argument("--lon", type=float, required=True)
@@ -1452,7 +1467,7 @@ def main():
     _main_impl(args)
 
 
-def _main_impl(args):
+def _main_impl(args: Any) -> None:
     """Core S1 processing logic, separated from CLI argument parsing."""
     t_all = time.perf_counter()
 
@@ -1560,9 +1575,21 @@ def _main_impl(args):
     quarterly_arrays = []
     quarter_band_stats = {q: {} for q in ['Q1','Q2','Q3','Q4']}
 
-    def process_single_item(item, bands, bounds, target_crs, dem_data, dem_transform, dem_crs,
-                            slope, aspect, aws_session, no_calibration, no_terrain_correction,
-                            simplified_incidence=False):
+    def process_single_item(
+        item: Any,
+        bands: list[str],
+        bounds: Any,
+        target_crs: str,
+        dem_data: np.ndarray,
+        dem_transform: Any,
+        dem_crs: Any,
+        slope: np.ndarray,
+        aspect: np.ndarray,
+        aws_session: Any,
+        no_calibration: bool,
+        no_terrain_correction: bool,
+        simplified_incidence: bool = False,
+    ) -> np.ndarray:
         """Process a single STAC item and return array of shape (bands, H, W)."""
         # Get geometry for this scene (fallback incidence angle from STAC properties)
         incidence_angle_fallback, look_direction = get_item_geometry(item)

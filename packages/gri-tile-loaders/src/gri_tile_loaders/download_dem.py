@@ -40,7 +40,7 @@ def get_aws_principal() -> str:
     return boto3.client("sts").get_caller_identity()["Arn"]
 
 
-def ensure_local_dirs_for_key(store, relpath: str) -> None:
+def ensure_local_dirs_for_key(store: LocalStore, relpath: str) -> None:
     # Only create local directories for LocalStore to avoid remote '.keep' artifacts
     if isinstance(store, LocalStore):
         dirname = os.path.dirname(relpath)
@@ -64,7 +64,7 @@ def bbox_4326_to_3857(bbox: Tuple[float, float, float, float]) -> Tuple[float, f
     x1, y1 = tf.transform(bbox[2], bbox[3])
     return (x0, y0, x1, y1)
 
-def slopePython(inBlock, outBlock, inXSize, inYSize, zScale=1):
+def slopePython(inBlock: np.ndarray, outBlock: np.ndarray, inXSize: np.ndarray, inYSize: np.ndarray, zScale: float = 1) -> np.ndarray:
     """ Calculate slope using Python.
         If Numba is available will make use of autojit function
         to run at ~ 1/2 the speed of the Fortran module.
@@ -93,14 +93,14 @@ def slopePython(inBlock, outBlock, inXSize, inYSize, zScale=1):
     return outBlock
 
 
-def slopePythonPlane(inBlock,
-                     outBlock,
-                     inXSize,
-                     inYSize,
-                     A_mat,
-                     z_vec,
-                     winSize=3,
-                     zScale=1):
+def slopePythonPlane(inBlock: np.ndarray,
+                     outBlock: np.ndarray,
+                     inXSize: np.ndarray,
+                     inYSize: np.ndarray,
+                     A_mat: np.ndarray,
+                     z_vec: np.ndarray,
+                     winSize: int = 3,
+                     zScale: float = 1) -> np.ndarray:
     """ Calculate slope using Python.
         Algorithm fits plane to a window of data and calculated the slope
         from this - slope than the standard algorithm but can deal with
@@ -160,13 +160,13 @@ def slopePythonPlane(inBlock,
     return outBlock
 
 
-def calcSlope(inBlock,
-              inXSize,
-              inYSize,
-              fitPlane=False,
-              zScale=1,
-              winSize=3,
-              minSlope=None):
+def calcSlope(inBlock: np.ndarray,
+              inXSize: np.ndarray,
+              inYSize: np.ndarray,
+              fitPlane: bool = False,
+              zScale: float = 1,
+              winSize: int = 3,
+              minSlope: float = None) -> np.ndarray:
     """ Calculates slope for a block of data
         Arrays are provided giving the size for each pixel.
         * inBlock - In elevation
@@ -198,7 +198,7 @@ def calcSlope(inBlock,
             outBlock[0])
     return outBlock
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(
         description="Copernicus DEM GLO-30 loader, legacy-compatible output."
     )

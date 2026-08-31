@@ -25,7 +25,7 @@ SHIFT_DIRECTIONS = {
 }
 
 
-def load_polygon(poly_uuid: str, geoparquet: str):
+def load_polygon(poly_uuid: str, geoparquet: str) -> tuple["gpd.GeoDataFrame", int]:
     """Load a single polygon by poly_uuid, return (GeoDataFrame, default_year).
 
     default_year is plantstart - 1 if available, else 2020.
@@ -57,7 +57,7 @@ def load_polygon(poly_uuid: str, geoparquet: str):
 
 
 def render_preview(
-    gdf,
+    gdf: "gpd.GeoDataFrame",
     tile_paths: list[str],
     year: int,
     poly_uuid: str,

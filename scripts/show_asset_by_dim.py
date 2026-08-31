@@ -63,7 +63,7 @@ def reduce_to_2d_preserve_spatial(arr: np.ndarray, spatial_axes: list[int]) -> n
     return trans
 
 
-def plot_panels(panels: list[np.ndarray], titles: list[str], cmap: str, percentile: float):
+def plot_panels(panels: list[np.ndarray], titles: list[str], cmap: str, percentile: float) -> None:
     n = len(panels)
     cols = min(4, n)
     rows = math.ceil(n / cols)
@@ -84,7 +84,7 @@ def plot_panels(panels: list[np.ndarray], titles: list[str], cmap: str, percenti
     plt.show()
 
 
-def plot_histograms(panels: list[np.ndarray], titles: list[str], bins: int = 50):
+def plot_histograms(panels: list[np.ndarray], titles: list[str], bins: int = 50) -> None:
     n = len(panels)
     cols = min(4, n)
     rows = math.ceil(n / cols)

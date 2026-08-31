@@ -13,10 +13,10 @@ from loguru import logger
 
 def superresolve_tile(
     arr: np.ndarray,
-    sess=None,
-    sr_logits=None,
-    sr_inp=None,
-    sr_inp_bilinear=None,
+    sess: "tf.compat.v1.Session" | None = None,
+    sr_logits: "tf.Tensor" | None = None,
+    sr_inp: "tf.Tensor" | None = None,
+    sr_inp_bilinear: "tf.Tensor" | None = None,
     window_size: int = 110,
 ) -> np.ndarray:
     """Super-resolve 20 m bands in a ``(T, H, W, 10)`` tile.

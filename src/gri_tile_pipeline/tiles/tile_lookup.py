@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import duckdb
 import pandas as pd
 
-TILE_RE = re.compile(r"^\s*(?P<x>\-?\d+)X(?P<y>\-?\d+)Y\s*$")
+TILE_RE: re.Pattern = re.compile(r"^\s*(?P<x>\-?\d+)X(?P<y>\-?\d+)Y\s*$")
 
 
 def decode_tile(token: str) -> Optional[Tuple[int, int]]:

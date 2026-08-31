@@ -7,7 +7,7 @@ import json
 from typing import Any, Dict, List
 
 
-REQUIRED_COLUMNS = {"Year", "X", "Y", "Y_tile", "X_tile"}
+REQUIRED_COLUMNS: set[str] = {"Year", "X", "Y", "Y_tile", "X_tile"}
 
 
 def _read_failed_jobs_json(path: str) -> List[Dict[str, Any]]:

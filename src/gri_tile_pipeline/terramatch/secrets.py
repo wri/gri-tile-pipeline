@@ -13,10 +13,10 @@ from gri_tile_pipeline.terramatch.client import (
     DEFAULT_STAGING_URL,
 )
 
-Env = Literal["staging", "production"]
+Env: type = Literal["staging", "production"]
 
-TOKEN_ENV_VAR = "GRI_TM_TOKEN"
-DEFAULT_SECRETS_PATH = "secrets.yaml"
+TOKEN_ENV_VAR: str = "GRI_TM_TOKEN"
+DEFAULT_SECRETS_PATH: str = "secrets.yaml"
 
 
 class MissingTMCredential(RuntimeError):
