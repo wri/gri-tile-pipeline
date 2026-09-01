@@ -91,7 +91,7 @@ def validate_aws(store, *, probe_key: str = "__aws_probe__") -> None:
         raise
 
 
-def obstore_put_hkl(store, relpath: str, obj) -> None:
+def obstore_put_hkl(store, relpath: str, obj: object) -> None:
     """Serialize *obj* via hickle and write to *store* at *relpath*."""
     import hickle as hkl
 

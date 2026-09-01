@@ -39,7 +39,7 @@ def load_raw(raw_data_folder: str, tile_id: str):
 
 
 
-def log_array_stats(tag: str, arr: np.ndarray, channel_names=None, channel_axis: int = -1, single_channel: bool = False):
+def log_array_stats(tag: str, arr: np.ndarray, channel_names: list[str] | None = None, channel_axis: int = -1, single_channel: bool = False):
     """
     Logs basic stats per channel.
 
@@ -88,7 +88,7 @@ def log_array_stats(tag: str, arr: np.ndarray, channel_names=None, channel_axis:
 # 
 # 
 
-def _find_tile_ids(raw_data_folder: str):
+def _find_tile_ids(raw_data_folder: str) -> list[str]:
     """Best-effort discovery of tile IDs present under the raw data folder."""
     candidates = set()
     try:
@@ -126,7 +126,7 @@ def _find_tile_ids(raw_data_folder: str):
     return sorted(candidates)
 
 
-def _log_dates_stats(tag: str, arr: np.ndarray):
+def _log_dates_stats(tag: str, arr: np.ndarray) -> None:
     if arr is None:
         logger.debug(f"{tag}: <None>")
         return
@@ -142,7 +142,7 @@ def _log_dates_stats(tag: str, arr: np.ndarray):
         logger.debug(f"{tag}: shape={a.shape}")
 
 
-def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names=None, bins: int = 256):
+def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names: list[str] | None = None, bins: int = 256) -> None:
     """Plot per-channel histograms over 0..65535 for arrays with channels in the last dim.
 
     - Supports arrays shaped (..., C). Collapses all but the last axis.
@@ -192,7 +192,14 @@ def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names=None, bins:
         pass
 
 
-def _plot_time_hw_c_hist_and_median_grid(groups, outfile: str = None, bins: int = 256, dates_info: dict = None, base_year: int = None, dem: np.ndarray = None):
+def _plot_time_hw_c_hist_and_median_grid(
+    groups: list[tuple[str, np.ndarray, list[str] | None]],
+    outfile: str = None,
+    bins: int = 256,
+    dates_info: dict | None = None,
+    base_year: int | None = None,
+    dem: np.ndarray | None = None,
+) -> None:
     """Create a single-page figure showing per-channel histograms and median images.
 
     groups: list of tuples (tag: str, arr: np.ndarray, channel_names: list[str] | None)
@@ -410,7 +417,7 @@ def _plot_time_hw_c_hist_and_median_grid(groups, outfile: str = None, bins: int 
             pass
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Log basic stats for raw tile arrays under a directory.")
     parser.add_argument("--directory", required=True, help="Path to raw data folder containing subdirs like s2_10, s2_20, clouds, misc, s1")
     parser.add_argument("--hist", action="store_true", help="Show per-channel histograms for s2_10, s2_20, and s1 (0..65535 x-axis)")

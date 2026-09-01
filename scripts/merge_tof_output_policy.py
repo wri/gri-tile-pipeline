@@ -33,7 +33,7 @@ import json
 import sys
 from pathlib import Path
 
-S3_BUCKET_POLICY_MAX_BYTES = 20 * 1024
+S3_BUCKET_POLICY_MAX_BYTES: int = 20 * 1024
 
 
 def _load_json(path: Path) -> object:

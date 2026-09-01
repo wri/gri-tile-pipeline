@@ -39,9 +39,9 @@ from gri_tile_pipeline.storage.tile_paths import (
     raw_ard_keys_by_source,
 )
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-GOLDEN_DIR = REPO_ROOT / "example" / "golden"
-GOLDEN_RAW = GOLDEN_DIR / "raw"
+REPO_ROOT: Path = Path(__file__).resolve().parent.parent
+GOLDEN_DIR: Path = REPO_ROOT / "example" / "golden"
+GOLDEN_RAW: Path = GOLDEN_DIR / "raw"
 
 # Matches tests/conftest.py:GOLDEN_TILES.
 TILES: list[tuple[int, int]] = [
@@ -49,8 +49,8 @@ TILES: list[tuple[int, int]] = [
     (1000, 799),
     (1000, 800),
 ]
-DEFAULT_YEAR = 2023
-DEFAULT_DEST = "s3://wri-restoration-geodata-ttc"
+DEFAULT_YEAR: int = 2023
+DEFAULT_DEST: str = "s3://wri-restoration-geodata-ttc"
 
 
 def _local_path_for_source(src: str, x: int, y: int) -> Path:
@@ -71,7 +71,7 @@ def _local_path_for_source(src: str, x: int, y: int) -> Path:
     return GOLDEN_RAW / src / f"{tag}.hkl"
 
 
-def _download(store, key: str, dest_path: Path, *, force: bool) -> tuple[bool, str]:
+def _download(store: obs.Store, key: str, dest_path: Path, *, force: bool) -> tuple[bool, str]:
     """Download a single object. Returns (success, status)."""
     rel = dest_path.relative_to(REPO_ROOT)
     if dest_path.exists() and not force:

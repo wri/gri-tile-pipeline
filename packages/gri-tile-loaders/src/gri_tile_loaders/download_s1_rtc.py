@@ -272,7 +272,7 @@ def coverage_fraction(item, tile_bounds: tuple) -> float:
 
 
 # -------------------- Solar Day Helpers --------------------
-def _get_solar_day(item) -> str | None:
+def _get_solar_day(item: dict) -> str | None:
     """Extract date string (YYYY-MM-DD) from item datetime."""
     dt = item.datetime if item.datetime else None
     if dt is None:
@@ -283,7 +283,7 @@ def _get_solar_day(item) -> str | None:
     return dt.strftime("%Y-%m-%d")
 
 
-def _group_items_by_day(items: list) -> dict[str, list]:
+def _group_items_by_day(items: list[dict]) -> dict[str, list[dict]]:
     """Group STAC items by solar day."""
     groups = {}
     for item in items:
@@ -295,7 +295,7 @@ def _group_items_by_day(items: list) -> dict[str, list]:
     return groups
 
 
-def _daily_coverage_fraction(items: list, tile_bounds: tuple) -> float:
+def _daily_coverage_fraction(items: list[dict], tile_bounds: tuple) -> float:
     """Calculate combined coverage fraction for multiple items (same day).
 
     Unions all item footprints then intersects with tile.
@@ -326,7 +326,7 @@ def _daily_coverage_fraction(items: list, tile_bounds: tuple) -> float:
         return 0.0
 
 
-def obstore_put_hkl(store, relpath: str, obj) -> None:
+def obstore_put_hkl(store: LocalStore, relpath: str, obj) -> None:
     tmp = tempfile.NamedTemporaryFile(suffix=".hkl", delete=False)
     tmp.close()
     try:
@@ -339,7 +339,7 @@ def obstore_put_hkl(store, relpath: str, obj) -> None:
         except Exception:
             pass
 
-def obstore_put_text(store, relpath: str, text: str) -> None:
+def obstore_put_text(store: LocalStore, relpath: str, text: str) -> None:
     try:
         obs.put(store, relpath, text.encode("utf-8"))
     except Exception as e:
@@ -369,7 +369,7 @@ def _to_numpy(x) -> np.ndarray:
         return np.asarray(x)
 
 
-def load_quarter_items_odc(items, bbox, resolution_m: int, bands: list) -> np.ndarray | None:
+def load_quarter_items_odc(items: list[dict], bbox: list[float], resolution_m: int, bands: list[str]) -> np.ndarray | None:
     """
     Load S1 RTC items using odc.stac at specified resolution.
 

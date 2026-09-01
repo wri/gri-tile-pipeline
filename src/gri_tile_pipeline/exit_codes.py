@@ -10,14 +10,14 @@ if TYPE_CHECKING:
 
 
 class ExitCode(IntEnum):
-    SUCCESS = 0
-    PARTIAL_FAILURE = 1
-    TOTAL_FAILURE = 2
-    BAD_INPUT = 3
-    MISSING_DEPENDENCY = 4
-    USER_ABORT = 5
-    NO_WORK = 6  # Nothing to process (all tiles exist)
-    TILES_MISSING = 10  # check command: some tiles not yet on S3
+    SUCCESS: int = 0
+    PARTIAL_FAILURE: int = 1
+    TOTAL_FAILURE: int = 2
+    BAD_INPUT: int = 3
+    MISSING_DEPENDENCY: int = 4
+    USER_ABORT: int = 5
+    NO_WORK: int = 6  # Nothing to process (all tiles exist)
+    TILES_MISSING: int = 10  # check command: some tiles not yet on S3
 
 
 def exit_code_from_tracker(tracker: JobTracker) -> ExitCode:

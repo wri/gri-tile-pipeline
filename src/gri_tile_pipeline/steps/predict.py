@@ -42,7 +42,7 @@ def _require_predict_config(path: str) -> None:
         )
 
 # Historical average prediction duration (seconds)
-AVG_PREDICT_DURATION = 180
+AVG_PREDICT_DURATION: int = 180
 
 
 # ------------------------------------

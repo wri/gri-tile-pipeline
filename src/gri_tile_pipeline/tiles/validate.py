@@ -9,7 +9,7 @@ from pathlib import Path
 from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
 
 
-REQUIRED_COLUMNS = {"Year", "X", "Y", "X_tile", "Y_tile"}
+REQUIRED_COLUMNS: set[str] = {"Year", "X", "Y", "X_tile", "Y_tile"}
 
 
 @dataclass

@@ -38,7 +38,7 @@ import time
 import uuid
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 # Repo root for `import gri_tile_loaders.predict_tile` (package form).
 # gri_tile_loaders/ so `import predict_tile` works (used by tests/parity/generate_report.py).
 # tests/ so the parity helpers import cleanly.
@@ -51,7 +51,7 @@ import numpy as np
 from loguru import logger
 
 
-_TILE_RE = re.compile(r"^(\d+)X(\d+)Y$")
+_TILE_RE: re.Pattern = re.compile(r"^(\d+)X(\d+)Y$")
 
 # ARD keys in the predictions bucket have drifted over time across two orthogonal axes:
 #   1. bucket prefix: <root> vs 'dev-ttc-lithops-usw2/' (and maybe others)
@@ -76,9 +76,9 @@ ARD_KEY_VARIANTS: tuple[tuple[str, str], ...] = (
 # Values are from AWS public pricing; update the constant + PRICING_STAMP
 # when AWS publishes a new rate card. See:
 #   https://aws.amazon.com/lambda/pricing/
-LAMBDA_PRICE_PER_GB_SEC = 0.0000166667
-LAMBDA_PRICE_PER_REQUEST = 0.0000002  # $0.20 per 1M requests
-PRICING_STAMP = "x86 us-east-1 standard tier (2026-04)"
+LAMBDA_PRICE_PER_GB_SEC: float = 0.0000166667
+LAMBDA_PRICE_PER_REQUEST: float = 0.0000002  # $0.20 per 1M requests
+PRICING_STAMP: str = "x86 us-east-1 standard tier (2026-04)"
 
 
 def _parse_tile(arg: str) -> tuple[int, int]:
@@ -177,7 +177,7 @@ def _resolve_ard_keys(
     return resolved
 
 
-def _verify_prediction_exists(store, year: int, x: int, y: int) -> str:
+def _verify_prediction_exists(store: "S3Store", year: int, x: int, y: int) -> str:
     """Ensure FINAL.tif exists at the bucket root and return its key."""
     import obstore as obs
 
@@ -194,7 +194,7 @@ def _verify_prediction_exists(store, year: int, x: int, y: int) -> str:
     return key
 
 
-def _load_ard(store, resolved_keys: dict[str, str]) -> dict[str, np.ndarray]:
+def _load_ard(store: "S3Store", resolved_keys: dict[str, str]) -> dict[str, np.ndarray]:
     """Download the six ARD files from their resolved S3 keys."""
     from gri_tile_loaders.predict_tile import _load_hkl
 
@@ -207,7 +207,7 @@ def _load_ard(store, resolved_keys: dict[str, str]) -> dict[str, np.ndarray]:
     return arrays
 
 
-def _load_existing_prediction(store, year: int, x: int, y: int) -> np.ndarray:
+def _load_existing_prediction(store: "S3Store", year: int, x: int, y: int) -> np.ndarray:
     """Read the existing ``FINAL.tif`` from S3 into a 2D uint8 array."""
     import io
 
@@ -223,7 +223,7 @@ def _load_existing_prediction(store, year: int, x: int, y: int) -> np.ndarray:
         return src.read(1)
 
 
-def _run_local_predict(ard: dict[str, np.ndarray], model_dir: Path, seed: int) -> dict:
+def _run_local_predict(ard: dict[str, np.ndarray], model_dir: Path, seed: int) -> dict[str, object]:
     """Run predict_tile_from_arrays locally. Returns {pred, execution} where
     ``execution`` is a mode-tagged dict consumed by the report builder."""
     from gri_tile_loaders.predict_tile import predict_tile_from_arrays
@@ -362,7 +362,7 @@ def _invoke_lambda(
     }
 
 
-def _download_scratch_prediction(store, scratch_key: str) -> np.ndarray:
+def _download_scratch_prediction(store: "S3Store", scratch_key: str) -> np.ndarray:
     """Read the Lambda's scratch FINAL.tif back into a uint8 array."""
     import io
 
@@ -375,7 +375,7 @@ def _download_scratch_prediction(store, scratch_key: str) -> np.ndarray:
         return src.read(1)
 
 
-def _delete_scratch(store, scratch_key: str) -> None:
+def _delete_scratch(store: "S3Store", scratch_key: str) -> None:
     import obstore as obs
 
     try:

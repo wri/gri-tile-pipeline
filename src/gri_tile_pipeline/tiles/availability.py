@@ -22,11 +22,11 @@ from gri_tile_pipeline.storage.tile_paths import (
     raw_ard_keys_by_source,
 )
 
-MAX_CONCURRENT = 50
+MAX_CONCURRENT: int = 50
 
 # Sources the per-source API recognizes. "prediction" is an alias for the
 # single prediction GeoTIFF.
-AVAILABLE_SOURCES = tuple(ARD_SOURCES) + ("prediction",)
+AVAILABLE_SOURCES: tuple[str, ...] = tuple(ARD_SOURCES) + ("prediction",)
 
 
 def _expected_keys(tile: Dict[str, Any], check_type: str) -> List[str]:
@@ -38,7 +38,7 @@ def _expected_keys(tile: Dict[str, Any], check_type: str) -> List[str]:
 
 
 async def _check_tiles_async(
-    store,
+    store: obs.Store,
     tiles: List[Dict[str, Any]],
     check_type: str,
 ) -> Dict[str, List[Dict[str, Any]]]:
@@ -71,7 +71,7 @@ def check_availability(
     *,
     check_type: str = "raw_ard",
     region: str = "us-east-1",
-    store=None,
+    store: obs.Store | None = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """Check which tiles already have outputs on S3.
 
@@ -116,7 +116,7 @@ def filter_missing_tiles(
     *,
     check_type: str = "raw_ard",
     region: str = "us-east-1",
-    store=None,
+    store: obs.Store | None = None,
 ) -> List[Dict[str, Any]]:
     """Convenience wrapper: return only the tiles that are missing from *dest*."""
     result = check_availability(
@@ -225,7 +225,7 @@ def check_availability_by_source(
     *,
     sources: tuple[str, ...] = AVAILABLE_SOURCES,
     region: str = "us-east-1",
-    store=None,
+    store: obs.Store | None = None,
 ) -> Dict[tuple[int, int, int], Dict[str, bool]]:
     """Per-source availability map: ``{(year, X_tile, Y_tile): {source: present, ...}}``.
 

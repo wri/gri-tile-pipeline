@@ -20,7 +20,7 @@ import click
 from gri_tile_pipeline.config import PipelineConfig
 
 
-CTX_KEY = "gri_ctx"
+CTX_KEY: str = "gri_ctx"
 
 
 def resolve_pipeline_version() -> str:

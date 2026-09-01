@@ -122,8 +122,21 @@ def gri_ttc(ctx: click.Context, config_path, log_level, log_format, verbose, qui
               help="Raw SQL WHERE expression against tm.geoparquet (alias `p`). "
                    "Mutually exclusive with INPUT. Read-only; `;` and DDL/DML are rejected.")
 @click.pass_context
-def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_polygons,
-            project_ids, short_names_opt, framework_keys, poly_uuids, cohorts, where_sql):
+def resolve(
+    ctx: click.Context,
+    input: str | None,
+    output: str,
+    year: int | None,
+    year_from_plantstart: bool,
+    geoparquet: str | None,
+    save_polygons: str | None,
+    project_ids: tuple[str, ...],
+    short_names_opt: tuple[str, ...],
+    framework_keys: tuple[str, ...],
+    poly_uuids: tuple[str, ...],
+    cohorts: tuple[str, ...],
+    where_sql: str | None,
+) -> None:
     """Resolve any supported input to a canonical tiles CSV.
 
     INPUT can be:
@@ -220,8 +233,15 @@ def resolve(ctx, input, output, year, year_from_plantstart, geoparquet, save_pol
               help="Output tiles CSV path.")
 
 @click.pass_context
-def polygons_missing_ttc(ctx, geoparquet, outermost_project_phase_name, short_name, framework_key, delimited_polygon_ids,
-                         output):
+def polygons_missing_ttc(
+    ctx: click.Context,
+    geoparquet: str,
+    outermost_project_phase_name: str,
+    short_name: str | None,
+    framework_key: str | None,
+    delimited_polygon_ids: str | None,
+    output: str,
+) -> None:
     """Find polygons missing ttc for specified project phase
 
     \b
@@ -287,8 +307,16 @@ def tiles():
               help="Output tiles CSV path. Without this, prints a summary only.")
 
 @click.pass_context
-def tiles_missing(ctx, geoparquet, tiledb, outermost_project_phase_name, short_name, framework_key, delimited_polygon_ids,
-                  output):
+def tiles_missing(
+    ctx: click.Context,
+    geoparquet: str,
+    tiledb: str | None,
+    outermost_project_phase_name: str,
+    short_name: str | None,
+    framework_key: str | None,
+    delimited_polygon_ids: str | None,
+    output: str | None,
+) -> None:
     """Find tiles for polygons missing TTC values.
     NOTE: The code only identifies tiles without TTC (tree_cover) value in the tm.geoparquet file. It does not
     query TerraMatch API directly.
@@ -356,7 +384,7 @@ def tiles_missing(ctx, geoparquet, tiledb, outermost_project_phase_name, short_n
 @click.option("--encoding", default="utf-8", show_default=True,
               help="Input file encoding (try utf-8-sig for Excel exports).")
 @click.pass_context
-def tiles_split(ctx, csv_path, chunk_size, encoding):
+def tiles_split(ctx: click.Context, csv_path: str, chunk_size: int | None, encoding: str) -> None:
     """Split CSV_PATH into header-preserving chunk files.
 
     Writes <base>_chunk_<n>.csv next to the input.
@@ -382,7 +410,14 @@ def tiles_split(ctx, csv_path, chunk_size, encoding):
 @click.option("--check-type", type=click.Choice(["raw_ard", "predictions"]),
               default="predictions", show_default=True)
 @click.pass_context
-def tiles_validate(ctx, csv_path, check_s3, dest, region, check_type):
+def tiles_validate(
+    ctx: click.Context,
+    csv_path: str,
+    check_s3: bool,
+    dest: str | None,
+    region: str | None,
+    check_type: str,
+) -> None:
     """Validate CSV_PATH: required columns present, row count, optional S3 ping."""
     from gri_tile_pipeline.cli_context import emit_json, get as get_ctx
     from gri_tile_pipeline.tiles.validate import validate_tiles_csv
@@ -446,9 +481,23 @@ def tiles_validate(ctx, csv_path, check_s3, dest, region, check_type):
 @click.option("--output-dir", default=".", show_default=True,
               help="Directory for the Markdown report + missing-tiles CSV.")
 @click.pass_context
-def report(ctx, input_csv, project_ids, short_names, framework_keys,
-           poly_uuids, cohorts, where_sql, geoparquet,
-           tiledb, bucket, region, check_type, skip_s3, output_dir):
+def report(
+    ctx: click.Context,
+    input_csv: str | None,
+    project_ids: tuple[str, ...],
+    short_names: tuple[str, ...],
+    framework_keys: tuple[str, ...],
+    poly_uuids: tuple[str, ...],
+    cohorts: tuple[str, ...],
+    where_sql: str | None,
+    geoparquet: str,
+    tiledb: str | None,
+    bucket: str | None,
+    region: str | None,
+    check_type: str,
+    skip_s3: bool,
+    output_dir: str,
+) -> None:
     """Generate a 4-phase TTC status report.
 
     \b
@@ -572,7 +621,14 @@ def audit_drops(ctx, request_csv, stats_csv, geoparquet, output):
 @click.option("-o", "--output", default=None, type=click.Path(),
               help="Output PNG path (default: temp/<poly_uuid>_ttc_preview.png).")
 @click.pass_context
-def preview_polygon(ctx, poly_uuid, year, geoparquet, show_shifts, output):
+def preview_polygon(
+    ctx: click.Context,
+    poly_uuid: str,
+    year: int | None,
+    geoparquet: str,
+    show_shifts: bool,
+    output: str | None,
+) -> None:
     """Render a PNG preview of POLY_UUID overlaid on its TTC prediction tiles."""
     from gri_tile_pipeline.cli_context import emit_json, get as get_ctx
     from gri_tile_pipeline.reporting.preview import preview_polygon as run_preview
@@ -603,7 +659,7 @@ def runs():
 @click.option("--limit", type=int, default=20, show_default=True,
               help="Max number of runs to show.")
 @click.pass_context
-def runs_list(ctx, limit):
+def runs_list(ctx: click.Context, limit: int) -> None:
     """Tabular list of past runs."""
     from gri_tile_pipeline.cli_context import emit_json, get as get_ctx
     from gri_tile_pipeline.tracking.run_index import list_runs
@@ -634,7 +690,7 @@ def runs_list(ctx, limit):
 @runs.command("show")
 @click.argument("run_id")
 @click.pass_context
-def runs_show(ctx, run_id):
+def runs_show(ctx: click.Context, run_id: str) -> None:
     """Show a run's full summary."""
     from gri_tile_pipeline.cli_context import emit_json, get as get_ctx
     from gri_tile_pipeline.tracking.run_index import get_run
@@ -675,7 +731,7 @@ def runs_show(ctx, run_id):
 @click.option("-o", "--output", default=None, type=click.Path(),
               help="Copy failed.csv to this path (default: stdout of path).")
 @click.pass_context
-def runs_failed(ctx, run_id, output):
+def runs_failed(ctx: click.Context, run_id: str, output: str | None) -> None:
     """Emit the tiles CSV of failed tiles from a past run (pipe into `gri-ttc run`)."""
     import shutil
 
@@ -709,7 +765,7 @@ def runs_failed(ctx, run_id, output):
 @click.option("-o", "--output", default=None, type=click.Path(),
               help="Write failed tiles to this path (default: <run_dir>/failed.csv).")
 @click.pass_context
-def runs_retry(ctx, run_id, output):
+def runs_retry(ctx: click.Context, run_id: str, output: str | None) -> None:
     """Print the command to re-run failed tiles from RUN_ID.
 
     Does not execute — the user wires the failed CSV into `gri-ttc run` with
@@ -781,8 +837,19 @@ _TILE_ID_RE = __import__("re").compile(r"^(\d+)X(\d+)Y$")
 @click.option("--exit-on-missing", is_flag=True,
               help="Exit with code 10 (TILES_MISSING) when tiles are missing.")
 @click.pass_context
-def check(ctx, input_path, dest, year, year_from_plantstart, geoparquet,
-          check_type, output, save_polygons, region, exit_on_missing):
+def check(
+    ctx: click.Context,
+    input_path: str,
+    dest: str | None,
+    year: int | None,
+    year_from_plantstart: bool,
+    geoparquet: str | None,
+    check_type: str,
+    output: str,
+    save_polygons: str | None,
+    region: str | None,
+    exit_on_missing: bool,
+) -> None:
     """Check tile availability on S3, output missing tiles.
 
     INPUT_PATH can be:
@@ -906,8 +973,23 @@ def check(ctx, input_path, dest, year, year_from_plantstart, geoparquet,
 @click.option("--dry-run", is_flag=True, help="Preview what would happen without submitting jobs.")
 @click.option("--yes", is_flag=True, help="Skip interactive approval prompt.")
 @click.pass_context
-def download(ctx, tiles_csv, dest, runtime, mem, retries, euc1_cfg, usw2_cfg,
-             report_dir, skip_existing, local, max_workers, debug, dry_run, yes):
+def download(
+    ctx: click.Context,
+    tiles_csv: str,
+    dest: str,
+    runtime: str | None,
+    mem: int | None,
+    retries: int | None,
+    euc1_cfg: str | None,
+    usw2_cfg: str | None,
+    report_dir: str,
+    skip_existing: bool,
+    local: bool,
+    max_workers: int,
+    debug: bool,
+    dry_run: bool,
+    yes: bool,
+) -> None:
     """Fan out DEM + S1 RTC + S2 download jobs via Lithops (or locally with --local).
 
     S1 uses Planetary Computer RTC by default. For the legacy Earth Search
@@ -992,9 +1074,24 @@ def download(ctx, tiles_csv, dest, runtime, mem, retries, euc1_cfg, usw2_cfg,
 @click.option("--dry-run", is_flag=True, help="Preview what would happen without submitting jobs.")
 @click.option("--yes", is_flag=True, help="Skip interactive approval prompt.")
 @click.pass_context
-def download_s1(ctx, tiles_csv, dest, runtime, mem, retries, s1_cfg,
-                pc_token_cache, pc_token_min_ttl_minutes,
-                report_dir, skip_existing, local, max_workers, debug, dry_run, yes):
+def download_s1(
+    ctx: click.Context,
+    tiles_csv: str,
+    dest: str,
+    runtime: str | None,
+    mem: int | None,
+    retries: int | None,
+    s1_cfg: str | None,
+    pc_token_cache: str,
+    pc_token_min_ttl_minutes: int,
+    report_dir: str,
+    skip_existing: bool,
+    local: bool,
+    max_workers: int,
+    debug: bool,
+    dry_run: bool,
+    yes: bool,
+) -> None:
     """Fan out S1 RTC acquisition jobs via Lithops (or locally with --local).
 
     This is a standalone S1-only command. The default ``download`` command
@@ -1070,8 +1167,22 @@ def download_s1(ctx, tiles_csv, dest, runtime, mem, retries, s1_cfg,
 @click.option("--aws-profile", default=None, help="AWS profile name (for --local S3 access).")
 @click.option("--yes", is_flag=True)
 @click.pass_context
-def predict(ctx, tiles_csv, dest, model_path, mem, retries,
-            skip_existing, report_dir, local, max_workers, debug, dry_run, aws_profile, yes):
+def predict(
+    ctx: click.Context,
+    tiles_csv: str,
+    dest: str,
+    model_path: str | None,
+    mem: int | None,
+    retries: int | None,
+    skip_existing: bool,
+    report_dir: str,
+    local: bool,
+    max_workers: int,
+    debug: bool,
+    dry_run: bool,
+    aws_profile: str | None,
+    yes: bool,
+) -> None:
     """Fan out tree cover prediction jobs via Lithops (or locally with --local)."""
     from gri_tile_pipeline.steps.predict import AVG_PREDICT_DURATION
     from gri_tile_pipeline.steps.download_ard import PRICE_PER_GB_SEC
@@ -1153,7 +1264,7 @@ def predict(ctx, tiles_csv, dest, model_path, mem, retries,
 @click.option("--shift-error/--no-shift-error", default=None,
               help="Enable/disable shift error calculation (overrides config).")
 @click.pass_context
-def stats(ctx, polygons, dest, year, output, lookup_parquet, lookup_csv, include_cols, lulc_raster, shift_error):
+def stats(ctx: click.Context, polygons: str, dest: str | None, year: int, output: str, lookup_parquet: str | None, lookup_csv: str | None, include_cols: str | None, lulc_raster: str | None, shift_error: bool | None) -> None:
     """Calculate zonal tree cover statistics for polygons."""
     from gri_tile_pipeline.steps.zonal_stats import run_zonal_stats
 
@@ -1191,7 +1302,7 @@ def stats(ctx, polygons, dest, year, output, lookup_parquet, lookup_csv, include
 @click.option("--mem", type=int, default=None, help="Lambda memory in MB.")
 @click.option("--include-predict", is_flag=True, help="Include prediction cost estimate.")
 @click.pass_context
-def cost(ctx, tiles_csv, mem, include_predict):
+def cost(ctx: click.Context, tiles_csv: str, mem: int | None, include_predict: bool) -> None:
     """Estimate Lambda costs without executing."""
     from gri_tile_pipeline.steps.download_ard import AVG_DURATIONS
     from gri_tile_pipeline.steps.predict import AVG_PREDICT_DURATION
@@ -1220,7 +1331,7 @@ def cost(ctx, tiles_csv, mem, include_predict):
         click.echo(f"  Grand total: ${result['grand_total']:.2f}")
 
 
-def cost_function(cfg, tiles_csv, mem=None, include_predict=False):
+def cost_function(cfg, tiles_csv: str, mem: int | None = None, include_predict: bool = False):
     """Estimate Lambda costs for a tile pipeline run.
 
     Mirrors the arguments of the ``cost`` CLI command so it can be invoked
@@ -1283,7 +1394,7 @@ def cost_function(cfg, tiles_csv, mem=None, include_predict=False):
 # run
 # ---------------------------------------------------------------------------
 
-VALID_STEPS = {"download", "predict", "stats", "mosaic"}
+VALID_STEPS: set[str] = {"download", "predict", "stats", "mosaic"}
 
 
 @gri_ttc.command()
@@ -1307,8 +1418,21 @@ VALID_STEPS = {"download", "predict", "stats", "mosaic"}
 @click.option("--dry-run", is_flag=True, help="Preview what would happen without executing.")
 @click.option("--yes", is_flag=True, help="Skip interactive approval prompt.")
 @click.pass_context
-def run(ctx, tiles_csv, dest, steps, polygons, year, output, mosaic_output,
-        local, max_workers, skip_existing, dry_run, yes):
+def run(
+    ctx: click.Context,
+    tiles_csv: str,
+    dest: str,
+    steps: str,
+    polygons: str | None,
+    year: int | None,
+    output: str,
+    mosaic_output: str,
+    local: bool,
+    max_workers: int,
+    skip_existing: bool,
+    dry_run: bool,
+    yes: bool,
+) -> None:
     """Execute pipeline steps on a tiles CSV.
 
     Takes the output of ``gri-ttc check`` and runs the requested steps.
@@ -1489,9 +1613,23 @@ def run(ctx, tiles_csv, dest, steps, polygons, year, output, mosaic_output,
 @click.option("-o", "--report", "report_csv", default=None, type=click.Path(),
               help="Write per-row outcome CSV here.")
 @click.pass_context
-def tm_patch(ctx, results_csv, project_id, tm_env, indicator_slug, year,
-             year_column, project_phase, percent_column, uncertainty_column,
-             apply, limit, base_url, token, report_csv):
+def tm_patch(
+    ctx: click.Context,
+    results_csv: str,
+    project_id: str,
+    tm_env: str,
+    indicator_slug: str,
+    year: int | None,
+    year_column: str,
+    project_phase: str,
+    percent_column: str,
+    uncertainty_column: str | None,
+    apply: bool,
+    limit: int | None,
+    base_url: str | None,
+    token: str | None,
+    report_csv: str | None,
+) -> None:
     """Patch TTC stats from a results CSV back onto TerraMatch polygons.
 
     Matches each row's ``poly_uuid`` against polygon ids returned by
@@ -1614,7 +1752,7 @@ def tm_patch(ctx, results_csv, project_id, tm_env, indicator_slug, year,
 @click.option("--tm-env", type=click.Choice(["staging", "production"]),
               default="staging", show_default=True)
 @click.pass_context
-def doctor(ctx, check_tm, tm_env):
+def doctor(ctx: click.Context, check_tm: bool, tm_env: str) -> None:
     """Verify the local environment is ready to run the pipeline.
 
     Runs a series of independent checks (config, AWS creds, Lithops env,
@@ -1705,13 +1843,34 @@ def doctor(ctx, check_tm, tm_env):
 @click.option("--tm-patch-apply", is_flag=True,
               help="Actually PATCH (default: dry-run).")
 @click.pass_context
-def run_project(ctx, short_name, input_csv, project_ids, short_names_opt,
-                framework_keys, poly_uuids, cohorts, where_sql,
-                dest, geoparquet, year, output,
-                local, max_workers, skip_existing, lulc_raster, shift_error,
-                missing_only, check_only, dry_run, yes,
-                tm_patch_enabled, tm_patch_env, tm_patch_project_id,
-                tm_patch_apply):
+def run_project(
+    ctx: click.Context,
+    short_name: str,
+    input_csv: str | None,
+    project_ids: list[str] | None,
+    short_names_opt: list[str] | None,
+    framework_keys: list[str] | None,
+    poly_uuids: list[str] | None,
+    cohorts: list[str] | None,
+    where_sql: str | None,
+    dest: str,
+    geoparquet: bool,
+    year: int | None,
+    output: str,
+    local: bool,
+    max_workers: int,
+    skip_existing: bool,
+    lulc_raster: str | None,
+    shift_error: bool | None,
+    missing_only: bool,
+    check_only: bool,
+    dry_run: bool,
+    yes: bool,
+    tm_patch_enabled: bool,
+    tm_patch_env: str,
+    tm_patch_project_id: str | None,
+    tm_patch_apply: bool,
+) -> None:
     """End-to-end pipeline for a TerraMatch project.
 
     Provide one of:
@@ -1822,7 +1981,7 @@ def run_project(ctx, short_name, input_csv, project_ids, short_names_opt,
     ctx.exit(run_exit)
 
 
-def _invoke_tm_patch(ctx, *, results_csv, project_id, tm_env, year, apply):
+def _invoke_tm_patch(ctx: click.Context, *, results_csv: str, project_id: str, tm_env: str, year: int, apply: bool) -> None:
     """Helper: run tm-patch inline after a successful run-project stats step."""
     from gri_tile_pipeline.terramatch import (
         IndicatorSpec,

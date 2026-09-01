@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import tempfile
 from typing import List
 
@@ -127,12 +126,6 @@ def _prefilter_tile(tile_path: str, out_dir: str) -> str:
     return out_path
 
 
-def _run_gdal(cmd: list[str]) -> None:
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"{cmd[0]} failed: {result.stderr.strip()}")
-
-
 def _apply_ttc_colormap(path: str) -> None:
     """Attach the legacy TTC green-ramp color table to band 1 of *path*."""
     import rasterio
@@ -150,13 +143,11 @@ def build_mosaic_vrt(
     the full merged array in memory.
 
     Unlike :func:`build_mosaic` (which uses ``rasterio.merge`` and loads
-    everything at once), this streams the merge via ``gdalbuildvrt`` +
-    ``gdal_translate``, so memory use stays flat regardless of how many
-    tiles (e.g. a whole country's worth) are being combined. Noise
-    filtering is applied per-tile before the VRT is built — see
-    :func:`_prefilter_tile`. The output has the legacy TTC green-ramp
-    color table attached (see :mod:`gri_tile_pipeline.zonal.ttc_colormap`),
-    matching the visual style of the reference country mosaics.
+    everything at once), this filters tiles individually before merging so
+    peak memory stays at O(1 tile) regardless of how many tiles are being
+    combined. The output has the legacy TTC green-ramp color table attached
+    (see :mod:`gri_tile_pipeline.zonal.ttc_colormap`), matching the visual
+    style of the reference country mosaics.
 
     Args:
         tile_paths: Local paths to prediction GeoTIFF tiles.
@@ -166,6 +157,9 @@ def build_mosaic_vrt(
     Returns:
         Path to the mosaic GeoTIFF.
     """
+    import rasterio
+    from rasterio.merge import merge
+
     if not tile_paths:
         raise ValueError("No tile paths provided")
 
@@ -181,19 +175,31 @@ def build_mosaic_vrt(
         os.makedirs(filtered_dir, exist_ok=True)
         filtered_paths = [_prefilter_tile(p, filtered_dir) for p in tile_paths]
 
-        vrt_path = os.path.join(work_dir, "mosaic.vrt")
-        vrt_cmd = ["gdalbuildvrt"]
-        if bounds is not None:
-            xmin, ymin, xmax, ymax = bounds
-            vrt_cmd += ["-te", str(xmin), str(ymin), str(xmax), str(ymax)]
-        vrt_cmd += [vrt_path, *filtered_paths]
-        _run_gdal(vrt_cmd)
+        datasets = [rasterio.open(p) for p in filtered_paths]
+        try:
+            merge_kwargs: dict = {"nodata": 255}
+            if bounds is not None:
+                merge_kwargs["bounds"] = bounds
+            arr, transform = merge(datasets, **merge_kwargs)
+            profile = datasets[0].profile
+        finally:
+            for ds in datasets:
+                ds.close()
 
-        _run_gdal([
-            "gdal_translate", vrt_path, output_path,
-            "-co", "COMPRESS=LZW", "-co", "TILED=YES",
-            "-a_nodata", "255",
-        ])
+        # Drop inherited block dimensions; they may not satisfy the ≥16 multiple
+        # requirement for tiled output when source tiles are small.
+        profile.pop("blockxsize", None)
+        profile.pop("blockysize", None)
+        profile.update(
+            dtype="uint8",
+            width=arr.shape[2],
+            height=arr.shape[1],
+            transform=transform,
+            nodata=255,
+            compress="lzw",
+        )
+        with rasterio.open(output_path, "w", **profile) as dst:
+            dst.write(arr)
         _apply_ttc_colormap(output_path)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)

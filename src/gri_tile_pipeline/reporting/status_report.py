@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 from gri_tile_pipeline.tiles.csv_io import write_tiles_csv
 
-_FORBIDDEN_SQL = re.compile(
+_FORBIDDEN_SQL: re.Pattern = re.compile(
     r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|ATTACH|COPY|PRAGMA)\b",
     re.IGNORECASE,
 )
@@ -37,7 +37,7 @@ def _validate_where_sql(where_sql: str) -> None:
         )
 
 
-HALF_TILE = 1.0 / 36
+HALF_TILE: float = 1.0 / 36
 
 
 @dataclass

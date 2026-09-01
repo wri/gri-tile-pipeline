@@ -48,7 +48,7 @@ _MODEL_SHA256_CACHE: Dict[str, str] = {}
 # Files the Dockerfile bakes the pipeline git sha into. Checked in order;
 # first non-empty read wins. Kept in sync with `COPY docker/.git_sha ...`
 # in docker/PredictDockerfile.
-_GIT_SHA_FILES = ("/function/.git_sha", "/var/task/.git_sha")
+_GIT_SHA_FILES: tuple[str, ...] = ("/function/.git_sha", "/var/task/.git_sha")
 
 
 def _resolve_container_git_sha() -> Optional[str]:

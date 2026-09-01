@@ -20,10 +20,10 @@ from loguru import logger
 
 from gri_tile_pipeline.terramatch.client import TMApiError, TMClient
 
-DEFAULT_SLUG = "treeCover"
-DEFAULT_PROJECT_PHASE = "implementation"
-DEFAULT_PERCENT_COLUMN = "ttc"
-DEFAULT_YEAR_COLUMN = "year"
+DEFAULT_SLUG: str = "treeCover"
+DEFAULT_PROJECT_PHASE: str = "implementation"
+DEFAULT_PERCENT_COLUMN: str = "ttc"
+DEFAULT_YEAR_COLUMN: str = "year"
 
 # Ordered candidates — first match wins. Columns produced by the zonal error-
 # propagation step when `--shift-error` is on live here; `_error` / `_stderr` /
@@ -58,7 +58,7 @@ class PatchOutcome:
     status: PatchStatus
     http_status: Optional[int] = None
     message: Optional[str] = None
-    payload: Optional[dict] = field(default=None, repr=False)
+    payload: Optional[dict[str, Any]] = field(default=None, repr=False)
 
     def as_dict(self) -> dict:
         out = {
@@ -103,7 +103,7 @@ def build_poly_id_set(client: TMClient, project_id: str) -> set[str]:
     return ids
 
 
-def _coerce_float(value) -> Optional[float]:
+def _coerce_float(value: Any) -> Optional[float]:
     if value is None:
         return None
     if isinstance(value, float) and math.isnan(value):

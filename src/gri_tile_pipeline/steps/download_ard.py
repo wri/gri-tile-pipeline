@@ -39,10 +39,10 @@ from lithops_workers import run_s2 as _run_s2
 # Cost estimation
 # ------------------------------------
 
-PRICE_PER_GB_SEC = 0.00001667
+PRICE_PER_GB_SEC: float = 0.00001667
 
 # Historical average durations per task type (seconds)
-AVG_DURATIONS = {"DEM": 9, "S1": 14, "S2": 62}
+AVG_DURATIONS: dict[str, int] = {"DEM": 9, "S1": 14, "S2": 62}
 
 
 def estimate_cost(num_tiles: int, memory_mb: int) -> Dict[str, float]:
@@ -216,7 +216,7 @@ def run_download_ard(
 # Local execution
 # ------------------------------------
 
-def _build_base_kwargs(tiles, dest, debug=False):
+def _build_base_kwargs(tiles: list[dict[str, Any]], dest: str, debug: bool = False) -> list[dict[str, Any]]:
     """Build list of per-tile keyword dicts for workers."""
     return [
         {

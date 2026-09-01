@@ -15,8 +15,8 @@ from typing import Any, Iterator, Optional
 
 from loguru import logger
 
-DEFAULT_STAGING_URL = "https://api-staging.terramatch.org/research/v3"
-DEFAULT_PRODUCTION_URL = "https://api.terramatch.org/research/v3"
+DEFAULT_STAGING_URL: str = "https://api-staging.terramatch.org/research/v3"
+DEFAULT_PRODUCTION_URL: str = "https://api.terramatch.org/research/v3"
 
 
 class TMApiError(Exception):
@@ -44,7 +44,7 @@ class TMClient:
         self.timeout = timeout
         self._headers = {"Authorization": f"Bearer {token}"}
 
-    def _get(self, path: str, params: Optional[dict] = None) -> dict:
+    def _get(self, path: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         logger.debug(f"TM GET {url} params={params}")
         resp = self.session.get(
@@ -54,7 +54,7 @@ class TMClient:
             raise TMApiError(resp.status_code, resp.text)
         return resp.json()
 
-    def _patch(self, path: str, payload: dict) -> Any:
+    def _patch(self, path: str, payload: dict[str, Any]) -> Any:
         url = f"{self.base_url}{path}"
         logger.debug(f"TM PATCH {url} payload={payload}")
         resp = self.session.patch(
@@ -90,7 +90,7 @@ class TMClient:
             params["page[after]"] = last_cursor
 
     def patch_site_polygon(
-        self, polygon_id: str, indicators: list[dict],
+        self, polygon_id: str, indicators: list[dict[str, Any]],
     ) -> Any:
         """PATCH ``/sitePolygons`` for a single polygon.
 

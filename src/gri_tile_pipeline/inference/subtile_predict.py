@@ -18,11 +18,11 @@ from gri_tile_pipeline.inference.normalize import normalize_subtile
 
 
 # Output crop size (matches reference global SIZE = 172-14)
-SIZE = 158
+SIZE: int = 158
 # Border pixels on each side for overlap
-BORDER = 7
+BORDER: int = 7
 # Full model input size
-INPUT_SIZE = SIZE + 2 * BORDER  # 172
+INPUT_SIZE: int = SIZE + 2 * BORDER  # 172
 
 
 def fspecial_gauss(size: int, sigma: float) -> np.ndarray:
