@@ -186,6 +186,10 @@ def build_mosaic_vrt(
             for ds in datasets:
                 ds.close()
 
+        # Drop inherited block dimensions; they may not satisfy the ≥16 multiple
+        # requirement for tiled output when source tiles are small.
+        profile.pop("blockxsize", None)
+        profile.pop("blockysize", None)
         profile.update(
             dtype="uint8",
             width=arr.shape[2],
@@ -193,7 +197,6 @@ def build_mosaic_vrt(
             transform=transform,
             nodata=255,
             compress="lzw",
-            tiled=True,
         )
         with rasterio.open(output_path, "w", **profile) as dst:
             dst.write(arr)
