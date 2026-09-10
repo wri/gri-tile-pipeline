@@ -13,7 +13,6 @@ import numpy as np
 from loguru import logger
 from math import sqrt
 from pyproj import Transformer
-from typing import Tuple
 
 from obstore.store import from_url, LocalStore
 import boto3
@@ -45,7 +44,7 @@ def ensure_local_dirs_for_key(store: LocalStore, relpath: str) -> None:
     if isinstance(store, LocalStore):
         dirname = os.path.dirname(relpath)
         if dirname:
-            os.makedirs(os.path.join(store.prefix, dirname), exist_ok=True)
+            os.makedirs(os.path.join(str(store.prefix), dirname), exist_ok=True)
 
 
 def bbox2geojson(bbox: list) -> dict:
@@ -58,7 +57,7 @@ def bbox2geojson(bbox: list) -> dict:
     ]
     return {"type": "Polygon", "coordinates": [coords]}
 
-def bbox_4326_to_3857(bbox: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
+def bbox_4326_to_3857(bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     tf = Transformer.from_crs(4326, 3857, always_xy=True)
     x0, y0 = tf.transform(bbox[0], bbox[1])
     x1, y1 = tf.transform(bbox[2], bbox[3])
@@ -164,9 +163,9 @@ def calcSlope(inBlock: np.ndarray,
               inXSize: np.ndarray,
               inYSize: np.ndarray,
               fitPlane: bool = False,
-              zScale: float = 1,
+              zScale: int = 1,
               winSize: int = 3,
-              minSlope: float = None) -> np.ndarray:
+              minSlope: float | None = None) -> np.ndarray:
     """ Calculates slope for a block of data
         Arrays are provided giving the size for each pixel.
         * inBlock - In elevation
@@ -187,7 +186,7 @@ def calcSlope(inBlock: np.ndarray,
         z_vec = np.zeros(winSize**2)
 
         slopePythonPlane(inBlock, outBlock, inXSize, inYSize, A_mat, z_vec,
-                         zScale, winSize)
+                         winSize=winSize, zScale=zScale)
     else:
         slopePython(inBlock, outBlock, inXSize, inYSize, zScale)
 
@@ -262,14 +261,15 @@ def _run_core(
         logger.warning("Could not retrieve AWS principal")
 
     initial_bbx = [lon, lat, lon, lat]
-    bbx = make_bbox(initial_bbx, expansion=expansion / 30)
+    bbx = make_bbox(initial_bbx, expansion= int(expansion / 30))
     logger.debug(f"BBX: {bbx}")
     geo_bbx = bbox2geojson(bbx)
 
     base_key = f"{year}/raw/{X_tile}/{Y_tile}/raw"
     misc_key = f"{base_key}/misc"
     fn_dem_key = f"{misc_key}/dem_{X_tile}X{Y_tile}Y.hkl"
-    ensure_local_dirs_for_key(store, fn_dem_key)
+    if isinstance(store, LocalStore):
+        ensure_local_dirs_for_key(store, fn_dem_key)
 
     client = Client.open(EARTH_SEARCH_V1)
     search = client.search(collections=[DEM_COLLECTION], bbox=bbx)

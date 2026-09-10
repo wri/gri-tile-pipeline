@@ -37,6 +37,10 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from obstore.store import S3Store
 
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 # Repo root for `import gri_tile_loaders.predict_tile` (package form).

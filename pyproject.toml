@@ -9,6 +9,7 @@ description = "GRI TTC tile pipeline: ingest, download, predict, stats"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "mypy",
     "click>=8.0",
     "pyyaml>=6.0",
     "loguru>=0.7",

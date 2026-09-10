@@ -11,10 +11,18 @@ Reference size conventions:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 from loguru import logger
 
 from gri_tile_pipeline.inference.normalize import normalize_subtile
+
+if TYPE_CHECKING:
+    # Adjust this import path if PredictSession actually lives elsewhere —
+    # it's a TYPE_CHECKING-only import so a wrong path can't break runtime,
+    # only static analysis.
+    from gri_tile_pipeline.inference.frozen_graph import PredictSession
 
 
 # Output crop size (matches reference global SIZE = 172-14)
@@ -32,9 +40,42 @@ def fspecial_gauss(size: int, sigma: float) -> np.ndarray:
     return g
 
 
+def _fit_2d(mask: np.ndarray, target_h: int, target_w: int) -> np.ndarray:
+    """Center-crop or zero-pad a 2D boolean mask to exactly (target_h, target_w).
+
+    Crops when the source is larger than the target on an axis, pads with
+    False (never flag the padded border as nodata — there's no real
+    information there to justify it) when the source is smaller. Used to
+    fit the interp-derived nodata mask (whose size depends on the raw
+    window extent, which differs between full-margin interior windows and
+    single-margin edge/corner windows) onto ``pred``'s fixed shape, which
+    is always ``(tile_size, tile_size)`` regardless of window position.
+    """
+
+    def _fit_axis(arr: np.ndarray, axis: int, target: int) -> np.ndarray:
+        cur = arr.shape[axis]
+        if cur == target:
+            return arr
+        if cur > target:
+            off = (cur - target) // 2
+            sl = [slice(None)] * arr.ndim
+            sl[axis] = slice(off, off + target)
+            return arr[tuple(sl)]
+        pad_total = target - cur
+        pad_before = pad_total // 2
+        pad_after = pad_total - pad_before
+        pad_width = [(0, 0)] * arr.ndim
+        pad_width[axis] = (pad_before, pad_after)
+        return np.pad(arr, pad_width, mode="constant", constant_values=False)
+
+    mask = _fit_axis(mask, 0, target_h)
+    mask = _fit_axis(mask, 1, target_w)
+    return mask
+
+
 def predict_subtile(
     subtile: np.ndarray,
-    predict_session,
+    predict_session: "PredictSession",
     output_size: int = SIZE,
     length: int = 4,
 ) -> np.ndarray:
@@ -53,6 +94,22 @@ def predict_subtile(
         return np.full((output_size, output_size), 255, dtype=np.float32)
 
     if not np.issubdtype(subtile.dtype, np.floating):
+        # NOTE: this path is currently dead code — the only caller in this
+        # file (mosaic_predictions) always passes the output of
+        # normalize_subtile(), which is already float, so this branch
+        # never actually runs today. It's left in defensively, but a bare
+        # /65535 rescale does NOT reproduce normalize_subtile()'s real
+        # per-channel normalization — if this function is ever called
+        # directly with raw (uint16) data, the model will silently
+        # receive inputs on the wrong distribution and produce wrong
+        # predictions with no error. Prefer calling normalize_subtile()
+        # yourself before this function rather than relying on this path.
+        logger.warning(
+            "predict_subtile received non-float input; applying a naive "
+            "/65535 rescale, which does NOT match normalize_subtile()'s "
+            "actual per-channel normalization. Predictions from this call "
+            "may be wrong — pass pre-normalized (already [-1, 1]) input instead."
+        )
         subtile = subtile / 65535.0
 
     batch_x = subtile[np.newaxis].astype(np.float32)
@@ -137,7 +194,12 @@ def _bright_surface_attenuation(subtile_raw: np.ndarray) -> np.ndarray:
     """
     from scipy.ndimage import binary_dilation, distance_transform_edt as distance
 
-    # EVI from channels 0 (Blue), 2 (Red), 3 (NIR)
+    # EVI from channels 0 (Blue), 2 (Red), 3 (NIR); SWIR1.6 from channel 8.
+    # NOTE: these channel indices assume the same feature-stack band order
+    # used elsewhere in the pipeline (e.g. wherever `feature_stack` is
+    # built before being passed into mosaic_predictions) — confirm they
+    # still match if that ordering ever changes, since a mismatch here
+    # would silently detect the wrong pixels as "bright" with no error.
     blue = np.clip(subtile_raw[..., 0], 0, 1)
     red = np.clip(subtile_raw[..., 2], 0, 1)
     nir = np.clip(subtile_raw[..., 3], 0, 1)
@@ -151,12 +213,22 @@ def _bright_surface_attenuation(subtile_raw: np.ndarray) -> np.ndarray:
     flag = flag * (evi < 0.3)
 
     bright = np.sum(flag, axis=0) > 1
-    bright = binary_dilation(1 - bright, iterations=2)
-    bright = binary_dilation(1 - bright, iterations=1)
+    # `1 - bright` promotes the bool array to a signed-int array (numpy's
+    # typing rules, not just a runtime quirk mypy is imagining), and
+    # binary_dilation's stub carries that dtype through — so reassigning
+    # straight back into `bright` trips a bool/int mismatch even though
+    # the values are still plain 0/1 masks. Cast back to bool explicitly;
+    # it's a no-op on the actual data.
+    bright = binary_dilation(1 - bright, iterations=2).astype(bool)
+    bright = binary_dilation(1 - bright, iterations=1).astype(bool)
 
     blurred = distance(1 - bright).astype(np.float32)
     blurred[blurred > 3] = 3
-    blurred = blurred / 3
+    # Dividing a float32 array by a plain Python int is typed as
+    # promoting to float64, even though numpy's actual runtime behavior
+    # keeps float32 here — pin the dtype explicitly rather than let the
+    # variable's declared type drift.
+    blurred = (blurred / 3).astype(np.float32)
 
     # Crop BORDER on each side to match prediction output size
     return blurred[BORDER:-BORDER, BORDER:-BORDER]
@@ -164,10 +236,10 @@ def _bright_surface_attenuation(subtile_raw: np.ndarray) -> np.ndarray:
 
 def mosaic_predictions(
     feature_stack: np.ndarray,
-    predict_session,
+    predict_session: "PredictSession",
     tile_size: int = SIZE,
     length: int = 4,
-    gauss_sigma: int = 36,
+    gauss_sigma: float = 36.0,
     interp: np.ndarray | None = None,
 ) -> np.ndarray:
     """Run prediction on overlapping subtiles and mosaic with Gaussian blending.
@@ -226,6 +298,7 @@ def mosaic_predictions(
         # Normalize and predict
         subtile_norm = normalize_subtile(subtile)
         pred = predict_subtile(subtile_norm, predict_session, tile_size, length)
+        ph, pw = pred.shape
 
         # Per-subtile nodata masking (reference lines 1570-1592)
         # Use interp mask to detect regions with no clear images, then apply
@@ -240,21 +313,50 @@ def mosaic_predictions(
                 mc_crop = min_clear[6:-6, 6:-6]
                 no_images = mc_crop < 1
                 struct2 = generate_binary_structure(2, 2)
-                no_images = 1 - binary_dilation(1 - no_images, structure=struct2, iterations=6)
-                no_images = binary_dilation(no_images, structure=struct2, iterations=6)
-                # Block-based thresholding for SIZE=158: reshape to (4, 40, 4, 40)
+                # Same bool/int promotion issue as `bright` above — cast
+                # back to bool at each reassignment rather than let the
+                # dtype drift to int through the `1 - ...` inversions.
+                no_images = (1 - binary_dilation(1 - no_images, structure=struct2, iterations=6)).astype(bool)
+                no_images = binary_dilation(no_images, structure=struct2, iterations=6).astype(bool)
+
                 ch, cw = no_images.shape
                 if ch == 160 and cw == 160:
-                    no_images = no_images.reshape(4, 40, 4, 40)
-                    no_images = np.sum(no_images, axis=(1, 3))
-                    no_images = no_images > (40 * 40) * 0.25
-                    no_images = no_images.repeat(40, axis=0).repeat(40, axis=1)
-                    no_images = no_images[1:-1, 1:-1]  # 160→158
-                    pred[no_images] = 255.0
+                    # Block-based thresholding for the tile_size=158
+                    # interior (full double-margin) case: reshape to
+                    # (4, 40, 4, 40), flag a block if >25% of its pixels
+                    # are "no clear imagery", upsample back, trim 160→158.
+                    blocked = no_images.reshape(4, 40, 4, 40)
+                    blocked = np.sum(blocked, axis=(1, 3))
+                    blocked = blocked > (40 * 40) * 0.25
+                    no_images_final = blocked.repeat(40, axis=0).repeat(40, axis=1)
+                    no_images_final = no_images_final[1:-1, 1:-1]  # 160→158
+                else:
+                    # Edge/corner windows (single-side margin) come out a
+                    # different shape after the same 6px crop than the
+                    # interior double-margin case — e.g. 165→153, which
+                    # is actually SMALLER than pred's fixed (158, 158)
+                    # shape, not larger — so they never matched the
+                    # hardcoded 160x160 check above and previously got NO
+                    # nodata masking at all, exactly for the windows most
+                    # likely to have thin/missing imagery near the tile
+                    # boundary. Fall back to the dilated-but-not-block-
+                    # averaged mask, fit (cropped or padded as needed) to
+                    # pred's shape, rather than silently skipping.
+                    no_images_final = _fit_2d(no_images, ph, pw)
 
-        # Apply bright surface attenuation (reference line 1600)
+                pred[no_images_final] = 255.0
+
+        # Apply bright surface attenuation (reference line 1600).
+        # Only scale actual predictions — pred can be *partially* nodata
+        # (255 sentinel) even when not np.all(pred == 255), and
+        # bright_attn can be exactly 0.0 right on a detected bright
+        # surface. Multiplying nodata pixels by 0.0 would turn 255 into
+        # 0.0, which slips past the `> 1.0` nodata checks used below
+        # (overlap calibration, mosaic blending) and gets silently
+        # treated as a genuine 0% tree-cover reading instead of nodata.
+        # Leave sentinel pixels untouched; only scale the valid ones.
         if not np.all(pred == 255):
-            pred = pred * bright_attn
+            pred = np.where(pred <= 1.0, pred * bright_attn, pred)
 
         pred = np.around(pred, 3).astype(np.float32)
         subtile_preds.append(pred)
@@ -296,7 +398,14 @@ def mosaic_predictions(
             ratios[i] = np.nanmean(np.abs(oth_mean - sub_vals))
 
         valid_ratios = ratios[~np.isnan(ratios)]
-        if len(valid_ratios) > 0 and np.all(valid_ratios > 0):
+        # Only need at least one usable positive ratio to calibrate —
+        # requiring ALL of them to be positive (the previous condition)
+        # meant a single window with a coincidental perfect (ratio == 0)
+        # agreement with its neighbors silently disabled calibration for
+        # the ENTIRE tile, with no log message. The per-window guard just
+        # below (`ratios[i] > 0`) already handles the div-by-zero case
+        # for each window individually, so it's not needed here too.
+        if valid_ratios.size > 0:
             med = np.median(valid_ratios)
             for i in range(n_windows):
                 if not np.isnan(ratios[i]) and ratios[i] > 0:
