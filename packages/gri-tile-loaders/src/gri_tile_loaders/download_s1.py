@@ -1788,7 +1788,7 @@ def _main_impl(args: argparse.Namespace) -> None:
         max_h = max(arr.shape[1] for arr in quarterly_arrays)
         max_w = max(arr.shape[2] for arr in quarterly_arrays)
 
-        def _pad_quarter_array(arr, target_shape):
+        def _pad_quarter_array(arr: np.ndarray, target_shape: tuple[int, int, int]) -> np.ndarray:
             pad_b = target_shape[0] - arr.shape[0]
             pad_h = target_shape[1] - arr.shape[1]
             pad_w = target_shape[2] - arr.shape[2]

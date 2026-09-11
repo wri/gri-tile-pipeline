@@ -28,6 +28,7 @@ from obstore.store import S3Store, LocalStore, from_url
 
 import boto3
 from pystac_client import Client
+from pystac_client.item_search import ItemSearch
 from odc.stac import load as stac_load, configure_rio
 from shapely.geometry import shape as shapely_shape
 
@@ -75,7 +76,7 @@ def _elapsed_ms(t_start: float) -> float:
     """Calculate elapsed time in milliseconds."""
     return (time.perf_counter() - t_start) * 1000.0
 
-def _to_numpy(x) -> np.ndarray:
+def _to_numpy(x: Any) -> np.ndarray:
     """Robust conversion to NumPy array across xarray/dask versions.
     Prefers .to_numpy() (xarray) and falls back to np.asarray.
     """
@@ -755,7 +756,7 @@ def _main_impl(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
     date_range = f"{year}"
 
     # Helper: log and retry STAC searches with light backoff
-    def _log_search_context(label: str, params: dict, search) -> None:
+    def _log_search_context(label: str, params: dict, search: ItemSearch) -> None:
         try:
             url = search.url_with_parameters()
             logger.debug(f"{label} STAC URL: {url}")
@@ -768,7 +769,7 @@ def _main_impl(year: int, lon: float, lat: float, x_tile: int, y_tile: int,
         collection: str,
         dt: str,
         geometry_kind: str,
-        geometry_value,
+        geometry_value: Any,
         query: dict,
         limit: int,
         attempts: int = 5,

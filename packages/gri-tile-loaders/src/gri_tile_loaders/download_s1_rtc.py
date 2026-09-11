@@ -327,7 +327,7 @@ def _daily_coverage_fraction(items: list[Item], tile_bounds: tuple) -> float:
         return 0.0
 
 
-def obstore_put_hkl(store: ObjectStore, relpath: str, obj) -> None:
+def obstore_put_hkl(store: ObjectStore, relpath: str, obj: object) -> None:
     tmp = tempfile.NamedTemporaryFile(suffix=".hkl", delete=False)
     tmp.close()
     try:
@@ -362,7 +362,7 @@ def compute_band_stats(arr: np.ndarray) -> dict:
             "valid_ratio": float(valid.size / total) if total > 0 else 0.0,
             "count": total, "valid_count": int(valid.size)}
 
-def _to_numpy(x) -> np.ndarray:
+def _to_numpy(x: Any) -> np.ndarray:
     """Robust conversion to NumPy array across xarray/dask versions."""
     try:
         return x.to_numpy()
@@ -522,7 +522,7 @@ def _build_stac_debug_info(
     }
 
 
-def _quarter_windows(year: int):
+def _quarter_windows(year: int) -> dict[str, tuple[str, str]]:
     # Same quarter “center-ish” windows used, dont @ me.
     return {
         "Q1": (f"{year}-01-15", f"{year}-03-15"),
@@ -660,7 +660,7 @@ def _detect_vv_vh_assets(item: Item) -> list[str]:
                 found.append(k)
 
     # keep order vv then vh if both exist
-    def _rank(k):
+    def _rank(k: str) -> int:
         kl = k.lower()
         return 0 if "vv" in kl else (1 if "vh" in kl else 2)
     found = sorted(set(found), key=_rank)
@@ -712,7 +712,7 @@ def _search_stac_items(
     Returns:
         Tuple of (items_list, attempt_count)
     """
-    def _do_search():
+    def _do_search() -> list[Item]:
         search = client.search(
             collections=[RTC_COLLECTION],
             datetime=f"{year}-01-01/{year}-12-31",
@@ -758,7 +758,7 @@ def _sign_items_with_retry(
     # Fallback: sign each item individually with retry
     signed_items = []
     for item in items:
-        def _sign_single(it=item):
+        def _sign_single(it: Item = item) -> Item:
             return pc.sign(it)
 
         signed_item, _ = retry_with_backoff(
@@ -798,14 +798,14 @@ def _load_quarter_with_retry(
     # Create working copy for re-signing
     working_items = items.copy()
 
-    def _re_sign_items():
+    def _re_sign_items() -> None:
         nonlocal working_items
         if sas_token:
             apply_sas_to_item_assets(working_items, sas_token, asset_keys=bands)
         else:
             working_items = [pc.sign(it) for it in items]
 
-    def _do_load():
+    def _do_load() -> np.ndarray | None:
         return load_quarter_items_odc(working_items, bbox, resolution_m, bands)
 
     try:
@@ -1106,7 +1106,7 @@ def main() -> dict | None:
     max_h = max(a.shape[1] for a in successful_quarters)
     max_w = max(a.shape[2] for a in successful_quarters)
 
-    def _pad(arr):
+    def _pad(arr: np.ndarray) -> np.ndarray:
         pad_b = max_bands - arr.shape[0]
         pad_h = max_h - arr.shape[1]
         pad_w = max_w - arr.shape[2]

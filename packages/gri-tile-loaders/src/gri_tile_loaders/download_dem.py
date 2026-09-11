@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import argparse
+from typing import Any
 import numpy as np
 from loguru import logger
 from math import sqrt
@@ -47,7 +48,7 @@ def ensure_local_dirs_for_key(store: LocalStore, relpath: str) -> None:
             os.makedirs(os.path.join(str(store.prefix), dirname), exist_ok=True)
 
 
-def bbox2geojson(bbox: list) -> dict:
+def bbox2geojson(bbox: list[float]) -> dict[str, Any]:
     coords = [
         [bbox[0], bbox[1]],
         [bbox[2], bbox[1]],
@@ -334,7 +335,7 @@ def run(
     dest: str,
     expansion: int = 300,
     debug: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Programmatic entry-point for Lithops and local execution."""
     _run_core(
         year=int(year), lon=float(lon), lat=float(lat),

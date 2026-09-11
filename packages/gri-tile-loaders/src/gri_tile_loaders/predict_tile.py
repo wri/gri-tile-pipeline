@@ -890,7 +890,7 @@ def run(
     seed: Optional[int] = None,
     prediction_key_override: Optional[str] = None,
     ard_keys_override: Optional[Dict[str, str]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Lithops entry-point for single-tile prediction.
 

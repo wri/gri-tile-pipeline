@@ -8,7 +8,6 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
-from typing import List
 
 import numpy as np
 from loguru import logger
@@ -34,7 +33,7 @@ def _filter_noise(band: np.ndarray) -> np.ndarray:
 
 
 def build_mosaic(
-    tile_paths: List[str],
+    tile_paths: list[str],
     output_path: str | None = None,
     bounds: tuple[float, float, float, float] | None = None,
 ) -> str:
@@ -135,7 +134,7 @@ def _apply_ttc_colormap(path: str) -> None:
 
 
 def build_mosaic_vrt(
-    tile_paths: List[str],
+    tile_paths: list[str],
     output_path: str | None = None,
     bounds: tuple[float, float, float, float] | None = None,
 ) -> str:

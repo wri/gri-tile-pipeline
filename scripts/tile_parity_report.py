@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from obstore.store import S3Store
+    from obstore.store import ObjectStore
 
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 # Repo root for `import gri_tile_loaders.predict_tile` (package form).
@@ -128,7 +128,7 @@ def _variant_label(key: str, year: int, x: int, y: int) -> str:
 
 
 def _resolve_ard_keys(
-    store, year: int, x: int, y: int,
+    store: "ObjectStore", year: int, x: int, y: int,
     variants: tuple[tuple[str, str], ...] = ARD_KEY_VARIANTS,
 ) -> dict[str, str]:
     """Resolve each ARD source independently to the first candidate that exists.
@@ -181,7 +181,7 @@ def _resolve_ard_keys(
     return resolved
 
 
-def _verify_prediction_exists(store: "S3Store", year: int, x: int, y: int) -> str:
+def _verify_prediction_exists(store: "ObjectStore", year: int, x: int, y: int) -> str:
     """Ensure FINAL.tif exists at the bucket root and return its key."""
     import obstore as obs
 
@@ -198,7 +198,7 @@ def _verify_prediction_exists(store: "S3Store", year: int, x: int, y: int) -> st
     return key
 
 
-def _load_ard(store: "S3Store", resolved_keys: dict[str, str]) -> dict[str, np.ndarray]:
+def _load_ard(store: "ObjectStore", resolved_keys: dict[str, str]) -> dict[str, np.ndarray]:
     """Download the six ARD files from their resolved S3 keys."""
     from gri_tile_loaders.predict_tile import _load_hkl
 
@@ -211,7 +211,7 @@ def _load_ard(store: "S3Store", resolved_keys: dict[str, str]) -> dict[str, np.n
     return arrays
 
 
-def _load_existing_prediction(store: "S3Store", year: int, x: int, y: int) -> np.ndarray:
+def _load_existing_prediction(store: "ObjectStore", year: int, x: int, y: int) -> np.ndarray:
     """Read the existing ``FINAL.tif`` from S3 into a 2D uint8 array."""
     import io
 
@@ -366,7 +366,7 @@ def _invoke_lambda(
     }
 
 
-def _download_scratch_prediction(store: "S3Store", scratch_key: str) -> np.ndarray:
+def _download_scratch_prediction(store: "ObjectStore", scratch_key: str) -> np.ndarray:
     """Read the Lambda's scratch FINAL.tif back into a uint8 array."""
     import io
 
@@ -379,7 +379,7 @@ def _download_scratch_prediction(store: "S3Store", scratch_key: str) -> np.ndarr
         return src.read(1)
 
 
-def _delete_scratch(store: "S3Store", scratch_key: str) -> None:
+def _delete_scratch(store: "ObjectStore", scratch_key: str) -> None:
     import obstore as obs
 
     try:

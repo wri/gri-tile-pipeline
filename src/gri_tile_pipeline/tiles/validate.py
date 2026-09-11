@@ -20,7 +20,7 @@ class ValidationReport:
     missing_columns: list[str] = field(default_factory=list)
     extra_columns: list[str] = field(default_factory=list)
     parse_errors: list[str] = field(default_factory=list)
-    availability: dict | None = None  # populated when check_s3=True
+    availability: dict[str, int] | None = None  # populated when check_s3=True
 
     def as_dict(self) -> dict:
         return {
