@@ -15,6 +15,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from collections.abc import Sequence
 from typing import List, Tuple, Dict, Optional, Union, Any
 from pathlib import Path
 
@@ -257,7 +258,7 @@ class SavePaths:
 # ----------------------------
 # Stage 1: Cloud Identification (replaces identify_clouds_big_bbx)
 # ----------------------------
-def identify_clouds_stac(items: List, bbox: tuple[float, float, float, float], year: int, log: Optional[Any] = None) ->\
+def identify_clouds_stac(items: List, bbox: Sequence[float], year: int, log: Optional[Any] = None) ->\
         Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Stage 1: Identify clean dates from cloud analysis.
@@ -413,7 +414,7 @@ def identify_clouds_stac(items: List, bbox: tuple[float, float, float, float], y
 # ----------------------------
 # Stage 2: Download Sentinel-2 (replaces download_sentinel_2_new)
 # ----------------------------
-def download_sentinel2_stac(items: List, bbox: tuple[float, float, float, float], clean_steps: np.ndarray,
+def download_sentinel2_stac(items: List, bbox: Sequence[float], clean_steps: np.ndarray,
         year: int, *, coverage_by_id: Optional[Dict[str, float]] = None, log: Optional[Any] = None) ->\
         Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """

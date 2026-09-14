@@ -65,6 +65,20 @@ def superresolve_tile(
             "or none of them (for bilinear-only fallback)."
         )
 
+    if arr.shape[1] < window_size or arr.shape[2] < window_size:
+        # x_range/y_range below assume arr is at least window_size on
+        # both spatial axes; a smaller tile would make
+        # `arr.shape[1] - window_size` negative, and negative indices in
+        # `arr[:, x:x+window_size, ...]` silently wrap around instead of
+        # raising, corrupting the output instead of failing loudly. Fail
+        # safe by skipping CNN super-resolution rather than risk that.
+        logger.warning(
+            f"Tile shape {arr.shape[1]}x{arr.shape[2]} is smaller than "
+            f"window_size={window_size} — skipping CNN super-resolution, "
+            "using bilinear upsampling only."
+        )
+        return arr
+
     def _worker(chunk: np.ndarray) -> np.ndarray:
         padded = np.pad(chunk, ((0, 0), (4, 4), (4, 4), (0, 0)), "reflect")
         bilinear = padded[..., 4:]
@@ -109,7 +123,18 @@ def superresolve_tile(
             elif x == x_range[-1]:
                 chunk = x_end[:, :, y : y + window_size, ...]
                 arr[:, x : x + window_size, y : y + window_size, ...] = _worker(chunk)
-            elif y != y_range[-1]:
+            elif y == y_range[-1]:
+                # BUG FIX: this was `elif y != y_range[-1]:`, which is
+                # unreachable — by the time you fail both prior branches
+                # (x is not the x-edge, and not [x-edge-or-y-edge]), y
+                # must already equal y_range[-1], so a condition of
+                # `y != y_range[-1]` here can never be true. That meant
+                # every "x is a regular window, but y is the last
+                # (edge) column" case matched NO branch at all and was
+                # silently skipped — the entire trailing column strip
+                # (minus the corner, which the x-edge branch above
+                # catches regardless of y) never got CNN super-resolved,
+                # with no error to indicate anything was wrong.
                 chunk = y_end[:, x : x + window_size, :, ...]
                 arr[:, x : x + window_size, y : y + window_size, ...] = _worker(chunk)
 

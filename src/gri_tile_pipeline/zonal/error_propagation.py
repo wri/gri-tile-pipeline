@@ -119,7 +119,9 @@ def shift_error(
 
     Tests N, S, E, W and 4 diagonal shifts of *offset* degrees,
     recalculates mean TTC for each shifted polygon, and returns
-    the RMSE of percent errors (matching reference formula).
+    the RMSE of percent errors over however many of the 8 shifts
+    actually produced a value (matching reference formula, but see
+    fix note below).
     """
     import geopandas as gpd
     import rasterio
@@ -163,7 +165,14 @@ def shift_error(
 
     if not percent_errors:
         return 0.0
-    return float((sum(percent_errors) / 8) ** 0.5)
+    # BUG FIX: was `sum(percent_errors) / 8` — always dividing by the
+    # fixed number of *attempted* shifts, not the number that actually
+    # produced a value. Any of the 8 exact_extract calls can silently
+    # drop out above (exception, or a None/NaN mean), and dividing the
+    # smaller sum by the still-fixed 8 systematically biased the RMS
+    # shift error downward whenever a partial failure occurred, with no
+    # signal that anything was missing. Divide by the actual count.
+    return float((sum(percent_errors) / len(percent_errors)) ** 0.5)
 
 
 def small_site_error(
@@ -322,6 +331,15 @@ def prep_lulc_data(polygons_gdf: "gpd.GeoDataFrame", lulc_raster_path: str, temp
                 height=data.shape[0],
                 transform=transform,
                 compress="lzw",
+                # BUG FIX: only band 1 is read above and only one band is
+                # written below (`dst.write(data, 1)`), but `count` was
+                # left at whatever `src.count` was, inherited unchanged
+                # from `src.profile.copy()`. ESA WorldCover is single-band
+                # in practice so this hasn't fired, but nothing here
+                # actually forced that — pin it explicitly so a
+                # multi-band source can't silently produce a
+                # partially-written output.
+                count=1,
             )
             with rasterio.open(output, "w", **profile) as dst:
                 dst.write(data, 1)
@@ -412,7 +430,7 @@ def compute_errors(
         geom = row.get("geometry", None)
 
         # Skip flagged/invalid TTC values
-        if ttc is None or (isinstance(ttc, float) and np.isnan(ttc)) or ttc == 200.0:
+        if ttc is None or pd.isna(ttc) or ttc == 200.0:
             result_row = row.to_dict()
             result_row.update({
                 "shift_error": None,

@@ -13,7 +13,7 @@ import math
 import pandas as pd
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Literal
+from typing import Any, Iterable, Literal, cast
 
 from gri_shared_library.constants import FORCE_NULL_PATCH_KEYWORD
 from loguru import logger
@@ -61,7 +61,7 @@ class PatchOutcome:
     payload: dict[str, Any] | None = field(default=None, repr=False)
 
     def as_dict(self) -> dict:
-        out = {
+        out: dict[str, Any] = {
             "poly_uuid": self.poly_uuid,
             "polygon_id": self.polygon_id,
             "status": self.status,
@@ -76,7 +76,11 @@ class PatchOutcome:
 def load_results(csv_path: str | Path) -> tuple[list[dict[str, Any]], list[str]]:
     """Return (rows, column_names) from *csv_path*."""
     df = pd.read_csv(csv_path)
-    return df.to_dict(orient="records"), list(df.columns)
+    # pandas types to_dict(orient="records") as list[dict[Hashable, Any]] since
+    # DataFrame columns are Hashable in general, but pd.read_csv always produces
+    # str column names — cast to the precise, always-true-here shape.
+    records = cast("list[dict[str, Any]]", df.to_dict(orient="records"))
+    return records, list(df.columns)
 
 
 def detect_uncertainty_column(columns: Iterable[str]) -> str | None:
@@ -136,11 +140,11 @@ def build_indicator(row: dict[str, Any], spec: IndicatorSpec) -> dict[str, Any]:
             f"no year available (pass --year or include {spec.year_column!r} column)"
         )
 
-    if (isinstance(row.get(spec.percent_column), str) and
-            row.get(spec.percent_column).upper() == FORCE_NULL_PATCH_KEYWORD.upper()):
+    percent_raw = row.get(spec.percent_column)
+    if isinstance(percent_raw, str) and percent_raw.upper() == FORCE_NULL_PATCH_KEYWORD.upper():
         percent = None
     else:
-        percent = _coerce_float(row.get(spec.percent_column))
+        percent = _coerce_float(percent_raw)
         if percent is None:
             raise ValueError(
                 f"row missing numeric {spec.percent_column!r} column"
