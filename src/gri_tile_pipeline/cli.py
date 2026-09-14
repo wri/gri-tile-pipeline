@@ -13,7 +13,7 @@ from gri_tile_pipeline.cli_context import (
     resolve_git_sha,
     resolve_pipeline_version,
 )
-from gri_tile_pipeline.config import load_config
+from gri_tile_pipeline.config import PipelineConfig, load_config
 from gri_tile_pipeline.exit_codes import ExitCode, exit_code_from_tracker
 from gri_tile_pipeline.logging import bind_run_context, new_run_id, setup_logging
 
@@ -1335,7 +1335,7 @@ def cost(ctx: click.Context, tiles_csv: str, mem: int | None, include_predict: b
         click.echo(f"  Grand total: ${result['grand_total']:.2f}")
 
 
-def cost_function(cfg: Any, tiles_csv: str, mem: int | None = None,
+def cost_function(cfg: PipelineConfig, tiles_csv: str, mem: int | None = None,
                    include_predict: bool = False) -> dict[str, Any]:
     """Estimate Lambda costs for a tile pipeline run.
 
