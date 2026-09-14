@@ -19,6 +19,7 @@ Enhanced version with:
 import os
 import sys
 import argparse
+
 from affine import Affine
 from rasterio.session import AWSSession
 import boto3
@@ -38,7 +39,7 @@ from datetime import datetime
 import time
 from loguru import logger
 import obstore as obs
-from obstore.store import LocalStore, from_url
+from obstore.store import LocalStore, from_url, ObjectStore
 import xml.etree.ElementTree as ET
 import requests
 from scipy.ndimage import distance_transform_edt
@@ -47,6 +48,7 @@ import hashlib
 import pickle
 from pathlib import Path
 from urllib.parse import urlparse
+from pystac import Item
 
 from gri_tile_loaders.shared import make_bbox, obstore_put_hkl, compute_band_stats
 
@@ -88,13 +90,15 @@ def bbox2geojson(bbox: list) -> dict:
         "coordinates": [[[x1,y1],[x2,y1],[x2,y2],[x1,y2],[x1,y1]]]
     }
 
-def coverage_fraction(item: dict, tile_bounds: tuple[float, float, float, float]) -> float:
+def coverage_fraction(item: Item, tile_bounds: tuple[float, float, float, float]) -> float:
     """Compute fraction of tile area covered by the item's footprint.
 
     Returns 0.0 on error.
     """
     try:
         tile_poly = box(*tile_bounds)
+        if item.geometry is None:
+            return 0.0
         item_poly = shape(item.geometry)
         inter = tile_poly.intersection(item_poly)
         if tile_poly.is_empty or tile_poly.area == 0:
@@ -104,13 +108,13 @@ def coverage_fraction(item: dict, tile_bounds: tuple[float, float, float, float]
         logger.warning(f"Failed computing coverage fraction for item {getattr(item, 'id', 'unknown')}: {e}")
         return 0.0
 
-def obstore_put_text(store, relpath: str, text: str) -> None:
+def obstore_put_text(store: ObjectStore, relpath: str, text: str) -> None:
     try:
         obs.put(store, relpath, text.encode("utf-8"))
     except Exception as e:
         logger.error(f"Failed to write text sidecar {relpath}: {e}")
 
-def ensure_dirs(store, *dirs: str) -> None:
+def ensure_dirs(store: ObjectStore, *dirs: str) -> None:
     for d in dirs:
         try:
             obs.put(store, d.rstrip("/") + "/.keep", b"")
@@ -127,7 +131,7 @@ class DEMCache:
         return hashlib.md5(bbox_str.encode()).hexdigest()
     
     @staticmethod
-    def get_cached_dem(bbox: list) -> tuple:
+    def get_cached_dem(bbox: list) -> tuple | None:
         """Try to load cached DEM data"""
         if DEM_CACHE_DIR is not None:
             cache_key = DEMCache.get_cache_key(bbox)
@@ -139,7 +143,7 @@ class DEMCache:
         return None
     
     @staticmethod
-    def save_dem_cache(bbox: list, dem_data: np.ndarray, dem_transform: np.ndarray, dem_crs: dict,
+    def save_dem_cache(bbox: list, dem_data: np.ndarray, dem_transform: Affine, dem_crs: CRS | str | dict | None,
                        slope: np.ndarray, aspect: np.ndarray) -> None:
         """Save DEM data to cache"""
         if DEM_CACHE_DIR is None:
@@ -154,7 +158,9 @@ class DEMCache:
         except Exception as e:
             logger.warning(f"Failed to write DEM cache: {e}")
 
-def fetch_copdem_for_bbox(bbox: list, buffer: float = 0.00002) -> tuple:
+def fetch_copdem_for_bbox(
+    bbox: list, buffer: float = 0.00002
+) -> tuple[np.ndarray | None, Affine | None, CRS | str | None, np.ndarray | None, np.ndarray | None]:
     """Fetch COP-DEM-GLO-30 data for the given bounding box with caching"""
     
     # Check cache first
@@ -329,7 +335,7 @@ def s3_to_https(s3_url: str, region: str = S1_REGION) -> str:
         logger.warning(f"Unknown URL scheme: {parsed.scheme} in {s3_url}")
         return s3_url
 
-def parse_calibration_xml(calibration_url: str, calibration_type: str = 'gamma') -> dict:
+def parse_calibration_xml(calibration_url: str, calibration_type: str = 'gamma') -> dict | None:
     """Parse Sentinel-1 calibration XML to extract LUT"""
     # Convert S3 URI to HTTPS if needed
     https_url = s3_to_https(calibration_url)
@@ -359,7 +365,7 @@ def parse_calibration_xml(calibration_url: str, calibration_type: str = 'gamma')
             logger.debug(f"XML structure: {ET.tostring(root, encoding='unicode')[:500]}")
             return None
         
-        lut_data = {
+        lut_data: dict[str, list] = {
             'lines': [],
             'pixels': [],
             'values': []
@@ -367,19 +373,23 @@ def parse_calibration_xml(calibration_url: str, calibration_type: str = 'gamma')
         
         vectors = calib_list.findall('calibrationVector')
         logger.debug(f"Found {len(vectors)} calibration vectors")
-        
+
         for vector in vectors:
-            line = int(vector.find('line').text)
-            pixel_list = [int(p) for p in vector.find('pixel').text.split()]
-            
-            # Find the correct calibration values
+            line_el = vector.find('line')
+            pixel_el = vector.find('pixel')
+            assert line_el is not None and line_el.text is not None
+            assert pixel_el is not None and pixel_el.text is not None
+            line = int(line_el.text)
+            pixel_list = [int(p) for p in pixel_el.text.split()]
+
             cal_element = vector.find(calibration_type)
             if cal_element is None:
                 cal_element = vector.find(f'{calibration_type}Nought')
             if cal_element is None and calibration_type == 'gamma':
                 cal_element = vector.find('gamma0')
-            
+
             if cal_element is not None:
+                assert cal_element.text is not None
                 value_list = [float(v) for v in cal_element.text.split()]
             else:
                 logger.warning(f"No {calibration_type} values found in vector")
@@ -464,16 +474,17 @@ def parse_thermal_noise_xml(noise_url: str) -> dict | None:
         if noise_list is None:
             # Log available tags for debugging
             seen = set()
-            for el in root.iter():
-                seen.add(el.tag.split('}')[-1])
+            for tag_el in root.iter():
+                seen.add(tag_el.tag.split('}')[-1])
             logger.warning("No thermal noise data found in XML")
             logger.debug(f"Available tags: {sorted(seen)}")
             logger.debug(f"Noise XML head: {ET.tostring(root, encoding='unicode')[:800]}")
             return None
 
+        assert vector_tag is not None and value_tags is not None
         logger.debug(f"Using noise list at path: {selected_path}, vectors tag: {vector_tag}")
 
-        lut_data = {'lines': [], 'pixels': [], 'values': []}
+        lut_data: dict[str, list] = {'lines': [], 'pixels': [], 'values': []}
         vectors = noise_list.findall(vector_tag)
         logger.debug(f"Found {len(vectors)} noise vectors in {vector_tag}")
 
@@ -509,6 +520,7 @@ def parse_thermal_noise_xml(noise_url: str) -> dict | None:
                 fr = vector.find('firstRangeSample')
                 lr = vector.find('lastRangeSample')
                 try:
+                    assert value_el.text is not None
                     values_len = len(value_el.text.split())
                 except Exception:
                     values_len = 0
@@ -528,6 +540,7 @@ def parse_thermal_noise_xml(noise_url: str) -> dict | None:
                     continue
 
             try:
+                assert pixel_text is not None and value_el.text is not None
                 pixel_list = [int(float(p)) for p in pixel_text.split()]
                 value_list = [float(v) for v in value_el.text.split()]
             except Exception:
@@ -560,7 +573,7 @@ def parse_thermal_noise_xml(noise_url: str) -> dict | None:
         logger.error(f"Failed to parse thermal noise XML: {e}")
         return None
 
-def find_noise_asset(item, band_or_pol: str) -> str | None:
+def find_noise_asset(item: Item, band_or_pol: str) -> str | None:
     """Find the thermal noise asset key for a given polarization.
 
     Prefers assets whose key or href matches 'schema-noise-<pol>.xml'.
@@ -595,7 +608,7 @@ def find_noise_asset(item, band_or_pol: str) -> str | None:
     return None
 
 
-def find_annotation_asset(item, band_or_pol: str) -> str | None:
+def find_annotation_asset(item: Item, band_or_pol: str) -> str | None:
     """Find the annotation asset key for a given polarization.
 
     Looks for annotation XML assets (iw-{pol}.xml pattern) that contain
@@ -657,7 +670,7 @@ def find_annotation_asset(item, band_or_pol: str) -> str | None:
     return None
 
 
-def get_annotation_href(item: Any, annotation_key: str | None) -> str | None:
+def get_annotation_href(item: Item, annotation_key: str | None) -> str | None:
     """Get the annotation href from an asset key or synthetic key."""
     if annotation_key is None:
         return None
@@ -721,9 +734,16 @@ def parse_incidence_angle_grid(annotation_url: str) -> dict | None:
         points_data = []
         for point in grid_points:
             try:
-                line = int(point.find('line').text)
-                pixel = int(point.find('pixel').text)
-                inc_angle = float(point.find('incidenceAngle').text)
+                line_el = point.find('line')
+                pixel_el = point.find('pixel')
+                angle_el = point.find('incidenceAngle')
+                if line_el is None or pixel_el is None or angle_el is None:
+                    raise AttributeError("missing line/pixel/incidenceAngle element")
+                if line_el.text is None or pixel_el.text is None or angle_el.text is None:
+                    raise AttributeError("missing text content")
+                line = int(line_el.text)
+                pixel = int(pixel_el.text)
+                inc_angle = float(angle_el.text)
                 points_data.append((line, pixel, inc_angle))
             except (AttributeError, ValueError, TypeError) as e:
                 logger.debug(f"Skipping malformed grid point: {e}")
@@ -782,7 +802,7 @@ def parse_incidence_angle_grid(annotation_url: str) -> dict | None:
         return None
 
 
-def interpolate_incidence_angle_to_image(grid_data: dict, shape: tuple) -> np.ndarray:
+def interpolate_incidence_angle_to_image(grid_data: dict | None, shape: tuple) -> np.ndarray:
     """Interpolate sparse incidence angle grid to full image dimensions.
 
     Uses RegularGridInterpolator for bilinear interpolation with
@@ -866,7 +886,7 @@ def interpolate_incidence_angle_to_image(grid_data: dict, shape: tuple) -> np.nd
     return interpolated
 
 
-def interpolate_lut_to_image(lut_data: dict, image_shape: tuple) -> np.ndarray:
+def interpolate_lut_to_image(lut_data: dict | None, image_shape: tuple) -> np.ndarray:
     """Interpolate calibration LUT to full image size"""
     h, w = image_shape
     calibration_grid = np.zeros((h, w), dtype=np.float32)
@@ -1002,7 +1022,7 @@ def apply_terrain_flattening(gamma0: np.ndarray, slope: np.ndarray, aspect: np.n
     
     return gamma0_terrain
 
-def get_item_geometry(item) -> tuple:
+def get_item_geometry(item: Item) -> tuple:
     """Extract incidence angle and look direction from STAC item"""
     incidence_angle = item.properties.get('sar:incidence_angle',
                                          item.properties.get('view:incidence_angle', 35))
@@ -1017,7 +1037,7 @@ def get_item_geometry(item) -> tuple:
     
     return float(incidence_angle), look_direction
 
-def find_calibration_asset(item: Any, band: str) -> str | None:
+def find_calibration_asset(item: Item, band: str) -> str | None:
     """Find the correct calibration asset name for a band.
 
     Uses polarization-aware matching to avoid returning VH calibration for VV or vice versa.
@@ -1072,16 +1092,16 @@ def process_band_with_terrain_correction(
     calibration_href: str,
     noise_href: str | None,
     annotation_href: str | None,
-    bounds: tuple,
+    bounds: tuple[float, float, float, float],
     target_crs: str,
     dem_data: np.ndarray,
-    dem_transform: Any,
-    dem_crs: Any,
+    dem_transform: Affine,
+    dem_crs: CRS | str | dict | None,
     slope: np.ndarray,
     aspect: np.ndarray,
     incidence_angle_fallback: float,
     look_direction: float,
-    aws_session,
+    aws_session: AWSSession,
     simplified_incidence: bool = False,
 ) -> np.ndarray:
     """Process a single band with calibration and terrain correction.
@@ -1291,9 +1311,9 @@ def process_band_with_terrain_correction(
 
 def process_band_simple(
     data_href: str,
-    bounds: tuple,
+    bounds: tuple[float, float, float, float],
     target_crs: str,
-    aws_session
+    aws_session: AWSSession
 ) -> np.ndarray:
     """Process a band without calibration or terrain correction"""
     
@@ -1318,7 +1338,7 @@ def process_band_simple(
                 
                 return data.astype(np.uint16)
 
-def get_quarterly_scenes_by_coverage(items: list, year: int, tile_bounds: tuple,
+def get_quarterly_scenes_by_coverage(items: list, year: int, tile_bounds: tuple[float, float, float, float],
                                      coverage_threshold: float = 0.95,
                                      k_scenes: int = 1) -> tuple:
     """Select up to k_scenes per quarter, preferring items whose footprint covers the tile.
@@ -1333,7 +1353,7 @@ def get_quarterly_scenes_by_coverage(items: list, year: int, tile_bounds: tuple,
         'Q4': (f'{year}-10-15', f'{year}-12-15')
     }
 
-    selected = {}
+    selected: dict[str, list[Item]] = {}
     quarter_meta = []
 
     for q_name, (start, end) in quarters.items():
@@ -1369,7 +1389,7 @@ def get_quarterly_scenes_by_coverage(items: list, year: int, tile_bounds: tuple,
         scored.sort(key=lambda t: t[0], reverse=True)
 
         # Select top k_scenes that meet coverage threshold (or best available)
-        top_k = []
+        top_k: list[tuple[float, Item]] = []
         for cf, it in scored[:k_scenes]:
             if cf >= coverage_threshold or len(top_k) == 0:
                 top_k.append((cf, it))
@@ -1467,7 +1487,7 @@ def main() -> None:
     _main_impl(args)
 
 
-def _main_impl(args: Any) -> None:
+def _main_impl(args: argparse.Namespace) -> None:
     """Core S1 processing logic, separated from CLI argument parsing."""
     t_all = time.perf_counter()
 
@@ -1527,10 +1547,12 @@ def _main_impl(args: Any) -> None:
     dem_data = dem_transform = dem_crs = slope = aspect = None
     if not args.no_terrain_correction:
         dem_data, dem_transform, dem_crs, slope, aspect = fetch_copdem_for_bbox(bbx)
-        if dem_data is None:
+        if dem_data is None or slope is None or aspect is None:
             logger.warning("DEM fetch failed, proceeding without terrain correction")
-        logger.debug(f"Slope stats: min={slope.min()}, max={slope.max()}, mean={slope.mean()}, std={slope.std()}")
-        logger.debug(f"Aspect stats: min={aspect.min()}, max={aspect.max()}, mean={aspect.mean()}, std={aspect.std()}")
+        else:
+            logger.debug(f"Slope stats: min={slope.min()}, max={slope.max()}, mean={slope.mean()}, std={slope.std()}")
+            logger.debug(
+                f"Aspect stats: min={aspect.min()}, max={aspect.max()}, mean={aspect.mean()}, std={aspect.std()}")
 
     # Compute tile bounds once
     tile_bounds = featureBounds(bbox2geojson(bbx))
@@ -1572,30 +1594,30 @@ def _main_impl(args: Any) -> None:
     bounds = tile_bounds
 
     # Process each quarter with multi-scene compositing
-    quarterly_arrays = []
-    quarter_band_stats = {q: {} for q in ['Q1','Q2','Q3','Q4']}
+    quarterly_arrays: list[np.ndarray] = []
+    quarter_band_stats: dict[str, dict[str, dict]] = {q: {} for q in ['Q1', 'Q2', 'Q3', 'Q4']}
 
     def process_single_item(
-        item: Any,
+        item: Item,
         bands: list[str],
-        bounds: Any,
+        bounds: tuple[float, float, float, float],
         target_crs: str,
-        dem_data: np.ndarray,
-        dem_transform: Any,
-        dem_crs: Any,
-        slope: np.ndarray,
-        aspect: np.ndarray,
-        aws_session: Any,
+        dem_data: np.ndarray | None,
+        dem_transform: Affine | None,
+        dem_crs: CRS | str | dict | None,
+        slope: np.ndarray | None,
+        aspect: np.ndarray | None,
+        aws_session: AWSSession,
         no_calibration: bool,
         no_terrain_correction: bool,
         simplified_incidence: bool = False,
-    ) -> np.ndarray:
+    ) -> np.ndarray | None:
         """Process a single STAC item and return array of shape (bands, H, W)."""
         # Get geometry for this scene (fallback incidence angle from STAC properties)
         incidence_angle_fallback, look_direction = get_item_geometry(item)
 
         # Process each band
-        band_arrays = []
+        band_arrays: list[np.ndarray] = []
         for band in bands:
             logger.debug(f"  Looking for band: {band}")
 
@@ -1653,7 +1675,14 @@ def _main_impl(args: Any) -> None:
                 else:
                     logger.debug(f"    No annotation asset found for {band}")
 
-                if dem_data is not None and not no_terrain_correction and cal_href:
+                if (
+                        dem_data is not None
+                        and dem_transform is not None
+                        and slope is not None
+                        and aspect is not None
+                        and not no_terrain_correction
+                        and cal_href
+                ):
                     # Full processing with calibration and terrain correction
                     arr = process_band_with_terrain_correction(
                         item.assets[actual_band].href,
@@ -1759,7 +1788,7 @@ def _main_impl(args: Any) -> None:
         max_h = max(arr.shape[1] for arr in quarterly_arrays)
         max_w = max(arr.shape[2] for arr in quarterly_arrays)
 
-        def _pad_quarter_array(arr, target_shape):
+        def _pad_quarter_array(arr: np.ndarray, target_shape: tuple[int, int, int]) -> np.ndarray:
             pad_b = target_shape[0] - arr.shape[0]
             pad_h = target_shape[1] - arr.shape[1]
             pad_w = target_shape[2] - arr.shape[2]

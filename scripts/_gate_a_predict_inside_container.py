@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 import hickle as hkl
 
@@ -23,7 +24,7 @@ MODELS = Path("/data/models")
 sys.path.insert(0, "/function")  # so `from gri_tile_loaders.predict_tile import ...` works
 
 
-def _load_tile_arrays(tile: str) -> dict:
+def _load_tile_arrays(tile: str) -> dict[str, Any]:
     arrays = {
         "s2_10": hkl.load(str(GOLDEN_RAW / "s2_10" / f"{tile}.hkl")),
         "s2_20": hkl.load(str(GOLDEN_RAW / "s2_20" / f"{tile}.hkl")),

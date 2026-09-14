@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from typing import List
+from typing import TYPE_CHECKING
 
 import pandas as pd
 from loguru import logger
@@ -18,8 +18,12 @@ import obstore as obs
 
 from gri_tile_pipeline.storage.tile_paths import prediction_key
 
+if TYPE_CHECKING:
+    import geopandas as gpd
+    from shapely.geometry.base import BaseGeometry
 
-def _load_polygons(path: str):
+
+def _load_polygons(path: str) -> "gpd.GeoDataFrame":
     """Load polygon geometries from GeoJSON/GeoPackage/Shapefile."""
     import geopandas as gpd
     return gpd.read_file(path)
@@ -56,7 +60,7 @@ def load_tile_lookup(
 
 
 def pre_filter_tiles(
-    geometry,
+    geometry: "BaseGeometry",
     global_lookup: pd.DataFrame,
     tile_size: float = 1 / 18,
 ) -> pd.DataFrame:
@@ -111,7 +115,7 @@ def download_prediction_tiles(
     lookup_csv: str | None = None,
     temp_dir: str | None = None,
     region: str = "us-east-1",
-) -> List[str]:
+) -> list[str]:
     """Download the prediction tiles that overlap the input polygons.
 
     Args:
@@ -146,7 +150,7 @@ def download_prediction_tiles(
             )
 
         # Collect tiles across all polygons
-        all_tiles: List[pd.Series] = []
+        all_tiles: list[pd.Series] = []
         for _, row in gdf.iterrows():
             pf = pre_filter_tiles(row.geometry, global_lookup)
             for _, tile_row in pf.iterrows():
@@ -168,7 +172,7 @@ def download_prediction_tiles(
         temp_dir = tempfile.mkdtemp(prefix="ttc_tiles_")
     os.makedirs(temp_dir, exist_ok=True)
 
-    local_paths: List[str] = []
+    local_paths: list[str] = []
     for _, tile in tiles_dedup.iterrows():
         x = int(tile["X_tile"])
         y = int(tile["Y_tile"])

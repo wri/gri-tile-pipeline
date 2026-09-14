@@ -194,7 +194,7 @@ def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names: list[str] 
 
 def _plot_time_hw_c_hist_and_median_grid(
     groups: list[tuple[str, np.ndarray, list[str] | None]],
-    outfile: str = None,
+    outfile: str | None = None,
     bins: int = 256,
     dates_info: dict | None = None,
     base_year: int | None = None,
