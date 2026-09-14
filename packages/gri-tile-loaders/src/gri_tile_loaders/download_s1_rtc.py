@@ -44,7 +44,7 @@ from obstore.store import LocalStore, from_url, ObjectStore
 import random
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Literal, TypeVar
 
 T = TypeVar('T')
 
@@ -1113,7 +1113,7 @@ def main() -> dict | None:
         if pad_b > 0:
             arr = np.pad(arr, ((0, pad_b), (0, 0), (0, 0)), mode="edge")
         if pad_h > 0 or pad_w > 0:
-            mode = "reflect" if (arr.shape[1] > 1 and arr.shape[2] > 1) else "edge"
+            mode: Literal["reflect", "edge"] = "reflect" if (arr.shape[1] > 1 and arr.shape[2] > 1) else "edge"
             arr = np.pad(arr, ((0, 0), (0, pad_h), (0, pad_w)), mode=mode)
         return arr
 

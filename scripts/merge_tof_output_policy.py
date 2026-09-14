@@ -58,6 +58,7 @@ def _validate_append(statements: object, path: Path) -> list[dict]:
     if not isinstance(statements, list):
         sys.exit(f"error: {path} must be a JSON array of statements, got {type(statements).__name__}")
     required = {"Effect", "Principal", "Action", "Resource"}
+    seen_sids: set[str] = set()
     for i, s in enumerate(statements):
         if not isinstance(s, dict):
             sys.exit(f"error: {path}[{i}] must be an object")
@@ -66,6 +67,18 @@ def _validate_append(statements: object, path: Path) -> list[dict]:
             sys.exit(f"error: {path}[{i}] missing required fields: {sorted(missing)}")
         if "Sid" not in s:
             sys.exit(f"error: {path}[{i}] must have a 'Sid' (required for idempotent merges)")
+        sid = s["Sid"]
+        if not isinstance(sid, str) or not sid:
+            sys.exit(
+                f"error: {path}[{i}] Sid must be a non-empty string"
+            )
+        if sid in seen_sids:
+            sys.exit(
+                f"error: {path}[{i}] duplicate Sid '{sid}' within the same --append file "
+                "(each Sid must be unique across the appended statements — merge() only "
+                "de-dupes against --current, not within --append itself)"
+            )
+        seen_sids.add(sid)
     return statements
 
 
@@ -83,6 +96,15 @@ def merge(current: dict, appended: list[dict]) -> tuple[dict, dict[str, list[str
             replaced.append(sid)
         else:
             existing.append(s)
+            # Keep sid_to_idx in sync as we go — without this, two new
+            # statements sharing a Sid (already rejected by _validate_append,
+            # but merge() is also unit-testable on its own) would both be
+            # appended instead of the second one replacing the first, and
+            # a second merge() call over the same appended list would not
+            # see this Sid as already present. Recording the index here is
+            # what makes merge() idempotent, which the module's own
+            # docstring promises.
+            sid_to_idx[sid] = len(existing) - 1
             added.append(sid)
 
     merged = {"Version": current.get("Version", "2012-10-17"), "Statement": existing}
@@ -92,7 +114,7 @@ def merge(current: dict, appended: list[dict]) -> tuple[dict, dict[str, list[str
     return merged, summary
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--current", required=True, type=Path, help="Existing policy JSON")
     parser.add_argument("--append", required=True, type=Path, help="Statements JSON array to append")
@@ -120,6 +142,8 @@ def main() -> None:
     print()
     print("Next: diff the result, then apply with aws s3api put-bucket-policy.")
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

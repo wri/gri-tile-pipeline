@@ -105,10 +105,10 @@ def load_superresolve_graph(model_dir: str) -> SuperResolveSession:
     pb_path = Path(model_dir) / "superresolve_graph.pb"
     if not pb_path.exists():
         raise FileNotFoundError(pb_path)
-    pb_path = str(pb_path)
-    logger.info(f"Loading super-resolution graph from {pb_path}")
+    pb_path_str = str(pb_path)
+    logger.info(f"Loading super-resolution graph from {pb_path_str}")
 
-    with tf.io.gfile.GFile(pb_path, "rb") as f:
+    with tf.io.gfile.GFile(pb_path_str, "rb") as f:
         graph_def.ParseFromString(f.read())
 
     graph = tf.Graph()

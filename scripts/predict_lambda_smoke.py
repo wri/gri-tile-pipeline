@@ -24,13 +24,20 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import yaml
 from loguru import logger
 
 # Known-good golden tiles with ARD already uploaded.
-KNOWN_TILES: dict[str, dict[str, int | float]] = {
+class TileCoord(TypedDict):
+    X_tile: int
+    Y_tile: int
+    lon: float
+    lat: float
+
+
+KNOWN_TILES: dict[str, TileCoord] = {
     "1000X871Y": {"X_tile": 1000, "Y_tile": 871, "lon": -54.4722, "lat": -5.1389},
     "1000X798Y": {"X_tile": 1000, "Y_tile": 798, "lon": -54.4722, "lat": -9.1944},
     "1000X799Y": {"X_tile": 1000, "Y_tile": 799, "lon": -54.4722, "lat": -9.1389},
@@ -38,7 +45,7 @@ KNOWN_TILES: dict[str, dict[str, int | float]] = {
 }
 
 
-def _resolve_tile(tile_arg: str, lookup_parquet: str | None) -> dict[str, int | float]:
+def _resolve_tile(tile_arg: str, lookup_parquet: str | None) -> TileCoord:
     """Resolve a tile argument to (X_tile, Y_tile, lon, lat).
 
     ``tile_arg`` is either a label like ``1000X871Y`` that we have hard-coded
@@ -71,7 +78,7 @@ def _resolve_tile(tile_arg: str, lookup_parquet: str | None) -> dict[str, int | 
     return {"X_tile": x_tile, "Y_tile": y_tile, "lon": row[0], "lat": row[1]}
 
 
-def _check_ard(tile: dict[str, int | float], year: int, dest: str) -> None:
+def _check_ard(tile: TileCoord, year: int, dest: str) -> None:
     from gri_tile_pipeline.tiles.availability import check_availability
 
     probe = dict(tile)
@@ -129,7 +136,7 @@ def _invoke_predict(
     return time.time() - t0
 
 
-def _validate_tif(dest: str, year: int, tile: dict[str, int | float]) -> dict[str, Any]:
+def _validate_tif(dest: str, year: int, tile: TileCoord) -> dict[str, Any]:
     import io
 
     import numpy as np

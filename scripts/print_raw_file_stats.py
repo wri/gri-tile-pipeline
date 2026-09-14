@@ -1,5 +1,7 @@
 
 
+from collections.abc import Sequence
+
 import numpy as np
 import hickle as hkl
 import os
@@ -169,9 +171,13 @@ def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names: list[str] 
 
     num_channels = a.shape[-1]
     num_rows = num_channels
-    fig, axes = plt.subplots(num_rows, 1, figsize=(8, max(2, num_rows * 2)), sharex=True)
-    if num_rows == 1:
-        axes = [axes]
+    # squeeze=False (matching the same pattern used elsewhere in this file)
+    # guarantees a 2D array of Axes regardless of num_rows, so indexing below
+    # is always valid instead of returning a bare Axes when num_rows == 1.
+    fig, axes_grid = plt.subplots(
+        num_rows, 1, figsize=(8, max(2, num_rows * 2)), sharex=True, squeeze=False,
+    )
+    axes = axes_grid[:, 0]
     for c in range(num_channels):
         v = a[:, c].astype(np.float64, copy=False)
         try:
@@ -184,7 +190,7 @@ def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names: list[str] 
         axes[c].grid(True, linestyle=":", alpha=0.3)
     axes[-1].set_xlabel("DN (0..65535)")
     fig.suptitle(f"{tag} per-channel histograms")
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.tight_layout(rect=(0, 0.03, 1, 0.95))
     try:
         import matplotlib.pyplot as plt  # re-import for environments that require top-level reference
         plt.show()
@@ -193,7 +199,7 @@ def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names: list[str] 
 
 
 def _plot_time_hw_c_hist_and_median_grid(
-    groups: list[tuple[str, np.ndarray, list[str] | None]],
+    groups: Sequence[tuple[str, np.ndarray, list[str] | None]],
     outfile: str | None = None,
     bins: int = 256,
     dates_info: dict | None = None,
@@ -305,7 +311,7 @@ def _plot_time_hw_c_hist_and_median_grid(
 
     axes[-1, 0].set_xlabel("DN (0..65535)")
     fig.suptitle("Per-channel histograms and median images")
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.tight_layout(rect=(0, 0.03, 1, 0.95))
 
     if outfile:
         try:
@@ -330,7 +336,7 @@ def _plot_time_hw_c_hist_and_median_grid(
 
                 # Dates pretty print
                 ax_text.axis('off')
-                def _format_doy_block(name: str, arr: np.ndarray):
+                def _format_doy_block(name: str, arr: np.ndarray | None):
                     if arr is None:
                         return f"{name}: <None>"
                     vals = np.asarray(arr).reshape(-1)

@@ -187,7 +187,7 @@ def calcSlope(inBlock: np.ndarray,
         z_vec = np.zeros(winSize**2)
 
         slopePythonPlane(inBlock, outBlock, inXSize, inYSize, A_mat, z_vec,
-                         zScale, winSize)
+                         winSize=winSize, zScale=zScale)
     else:
         slopePython(inBlock, outBlock, inXSize, inYSize, zScale)
 
@@ -262,14 +262,15 @@ def _run_core(
         logger.warning("Could not retrieve AWS principal")
 
     initial_bbx = [lon, lat, lon, lat]
-    bbx = make_bbox(initial_bbx, expansion=expansion / 30)
+    bbx = make_bbox(initial_bbx, expansion= int(expansion / 30))
     logger.debug(f"BBX: {bbx}")
     geo_bbx = bbox2geojson(bbx)
 
     base_key = f"{year}/raw/{X_tile}/{Y_tile}/raw"
     misc_key = f"{base_key}/misc"
     fn_dem_key = f"{misc_key}/dem_{X_tile}X{Y_tile}Y.hkl"
-    ensure_local_dirs_for_key(store, fn_dem_key)
+    if isinstance(store, LocalStore):
+        ensure_local_dirs_for_key(store, fn_dem_key)
 
     client = Client.open(EARTH_SEARCH_V1)
     search = client.search(collections=[DEM_COLLECTION], bbox=bbx)

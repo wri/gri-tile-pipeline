@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -72,7 +73,7 @@ def build_mosaic(
     # Step 1: Merge tiles (clipped to bounds if provided)
     datasets = [rasterio.open(p) for p in tile_paths]
     try:
-        merge_kwargs = {"nodata": 255}
+        merge_kwargs: dict[str, Any] = {"nodata": 255}
         if bounds is not None:
             merge_kwargs["bounds"] = bounds
         arr, transform = merge(datasets, **merge_kwargs)

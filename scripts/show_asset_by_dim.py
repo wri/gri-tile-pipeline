@@ -173,7 +173,7 @@ def load_npy_panels_from_array(arr: np.ndarray, dim: int, max_panels: int) -> tu
     else:
         indices = np.linspace(0, slices - 1, num=max_panels, dtype=int).tolist()
     for i in indices:
-        slicer = [slice(None)] * arr.ndim
+        slicer: list[slice | int] = [slice(None)] * arr.ndim
         slicer[dim] = i
         sliced = arr[tuple(slicer)]
         img2 = reduce_to_2d_preserve_spatial(sliced, spatial_axes=[ax - (1 if ax > dim else 0) for ax in spatial_axes if ax != dim])
