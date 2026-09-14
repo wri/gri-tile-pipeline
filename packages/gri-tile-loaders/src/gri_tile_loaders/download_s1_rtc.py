@@ -29,6 +29,7 @@ import numpy as np
 # from rasterio.windows import from_bounds
 from rasterio.features import bounds as featureBounds
 
+from pystac import Item
 from pystac_client import Client
 import planetary_computer as pc
 from shapely.geometry import shape, box
@@ -39,11 +40,11 @@ from loguru import logger
 from odc.stac import load as stac_load, configure_rio
 
 import obstore as obs
-from obstore.store import LocalStore, from_url
+from obstore.store import LocalStore, from_url, ObjectStore
 import random
 import traceback
 from dataclasses import dataclass
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 T = TypeVar('T')
 
@@ -55,7 +56,7 @@ class S1ProcessingError(Exception):
 
 class RetryableError(S1ProcessingError):
     """Errors that may succeed on retry (429, 5xx, timeout, network)."""
-    def __init__(self, message: str, original_exception: Exception = None,
+    def __init__(self, message: str, original_exception: Exception | None = None,
                  attempt: int = 0, operation: str = ""):
         super().__init__(message)
         self.original_exception = original_exception
@@ -65,7 +66,7 @@ class RetryableError(S1ProcessingError):
 
 class PermanentError(S1ProcessingError):
     """Errors that will not succeed on retry (bad geometry, no data, auth)."""
-    def __init__(self, message: str, original_exception: Exception = None):
+    def __init__(self, message: str, original_exception: Exception | None = None):
         super().__init__(message)
         self.original_exception = original_exception
 
@@ -107,7 +108,7 @@ def retry_with_backoff(
     max_backoff: float = 30.0,
     backoff_factor: float = 2.0,
     jitter_range: tuple = (0.0, 1.0),
-    pre_retry_hook: Callable[[], None] = None,
+    pre_retry_hook: Callable[[], None] | None = None,
 ) -> tuple[T, int]:
     """
     Execute an operation with exponential backoff retry.
@@ -130,7 +131,7 @@ def retry_with_backoff(
         RetryableError: If all retries exhausted on retryable error
         PermanentError: If a permanent error is encountered
     """
-    last_exception = None
+    last_exception: Exception | None = None
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -220,7 +221,7 @@ def append_sas_to_href(href: str, sas_token: str) -> str:
     q.update(dict(parse_qsl(sas_token, keep_blank_values=True)))
     return urlunparse((u.scheme, u.netloc, u.path, u.params, urlencode(q), u.fragment))
 
-def apply_sas_to_item_assets(items, sas_token: str, asset_keys: list[str] | None = None):
+def apply_sas_to_item_assets(items: list[Item], sas_token: str, asset_keys: list[str] | None = None) -> list[Item]:
     """Mutate PySTAC Items in-place to append SAS tokens to selected asset hrefs."""
     sas_token = _normalize_sas_token(sas_token)
     if not sas_token:
@@ -240,7 +241,7 @@ def apply_sas_to_item_assets(items, sas_token: str, asset_keys: list[str] | None
 def _elapsed_ms(t_start: float) -> float:
     return (time.perf_counter() - t_start) * 1000.0
 
-def make_bbox(initial_bbx: list, expansion: int = 10) -> list:
+def make_bbox(initial_bbx: list, expansion: float = 10) -> list:
     """Expand a point bbox by ~degrees (same style as your code)."""
     multiplier = 1 / 360
     bbx = initial_bbx.copy()
@@ -257,7 +258,7 @@ def bbox2geojson(bbox: list) -> dict:
         "coordinates": [[[x1,y1],[x2,y1],[x2,y2],[x1,y2],[x1,y1]]]
     }
 
-def coverage_fraction(item, tile_bounds: tuple) -> float:
+def coverage_fraction(item: Item, tile_bounds: tuple) -> float:
     """Compute fraction of tile area covered by the item's footprint."""
     try:
         tile_poly = box(*tile_bounds)
@@ -272,7 +273,7 @@ def coverage_fraction(item, tile_bounds: tuple) -> float:
 
 
 # -------------------- Solar Day Helpers --------------------
-def _get_solar_day(item: dict) -> str | None:
+def _get_solar_day(item: Item) -> str | None:
     """Extract date string (YYYY-MM-DD) from item datetime."""
     dt = item.datetime if item.datetime else None
     if dt is None:
@@ -283,9 +284,9 @@ def _get_solar_day(item: dict) -> str | None:
     return dt.strftime("%Y-%m-%d")
 
 
-def _group_items_by_day(items: list[dict]) -> dict[str, list[dict]]:
+def _group_items_by_day(items: list[Item]) -> dict[str, list[Item]]:
     """Group STAC items by solar day."""
-    groups = {}
+    groups: dict[str, list[Item]] = {}
     for item in items:
         day = _get_solar_day(item)
         if day:
@@ -295,7 +296,7 @@ def _group_items_by_day(items: list[dict]) -> dict[str, list[dict]]:
     return groups
 
 
-def _daily_coverage_fraction(items: list[dict], tile_bounds: tuple) -> float:
+def _daily_coverage_fraction(items: list[Item], tile_bounds: tuple) -> float:
     """Calculate combined coverage fraction for multiple items (same day).
 
     Unions all item footprints then intersects with tile.
@@ -326,7 +327,7 @@ def _daily_coverage_fraction(items: list[dict], tile_bounds: tuple) -> float:
         return 0.0
 
 
-def obstore_put_hkl(store: LocalStore, relpath: str, obj) -> None:
+def obstore_put_hkl(store: ObjectStore, relpath: str, obj: object) -> None:
     tmp = tempfile.NamedTemporaryFile(suffix=".hkl", delete=False)
     tmp.close()
     try:
@@ -339,7 +340,7 @@ def obstore_put_hkl(store: LocalStore, relpath: str, obj) -> None:
         except Exception:
             pass
 
-def obstore_put_text(store: LocalStore, relpath: str, text: str) -> None:
+def obstore_put_text(store: ObjectStore, relpath: str, text: str) -> None:
     try:
         obs.put(store, relpath, text.encode("utf-8"))
     except Exception as e:
@@ -361,7 +362,7 @@ def compute_band_stats(arr: np.ndarray) -> dict:
             "valid_ratio": float(valid.size / total) if total > 0 else 0.0,
             "count": total, "valid_count": int(valid.size)}
 
-def _to_numpy(x) -> np.ndarray:
+def _to_numpy(x: Any) -> np.ndarray:
     """Robust conversion to NumPy array across xarray/dask versions."""
     try:
         return x.to_numpy()
@@ -369,7 +370,7 @@ def _to_numpy(x) -> np.ndarray:
         return np.asarray(x)
 
 
-def load_quarter_items_odc(items: list[dict], bbox: list[float], resolution_m: int, bands: list[str]) -> np.ndarray | None:
+def load_quarter_items_odc(items: list[Item], bbox: list[float], resolution_m: int, bands: list[str]) -> np.ndarray | None:
     """
     Load S1 RTC items using odc.stac at specified resolution.
 
@@ -389,7 +390,7 @@ def load_quarter_items_odc(items: list[dict], bbox: list[float], resolution_m: i
     ds = stac_load(
         items,
         bands=bands,
-        bbox=bbox,
+        bbox=(bbox[0], bbox[1], bbox[2], bbox[3]),
         resolution=resolution_m,
         groupby="solar_day",  # Mosaic same-day scenes together
         resampling="bilinear",
@@ -428,9 +429,9 @@ def _orbit_query(orbit_direction: str) -> dict:
 
 
 # -------------------- Orbit Direction Helpers --------------------
-def _group_by_orbit(items: list) -> dict[str, list]:
+def _group_by_orbit(items: list[Item]) -> dict[str, list[Item]]:
     """Group STAC items by orbit direction."""
-    groups = {"ascending": [], "descending": []}
+    groups: dict[str, list[Item]] = {"ascending": [], "descending": []}
     for item in items:
         orbit = item.properties.get("sat:orbit_state", "").lower()
         if orbit in groups:
@@ -439,7 +440,7 @@ def _group_by_orbit(items: list) -> dict[str, list]:
 
 
 def _count_qualifying_items(
-    items: list,
+    items: list[Item],
     tile_bounds: tuple,
     coverage_threshold: float,
     k_scenes: int,
@@ -488,7 +489,7 @@ def _count_qualifying_items(
 
 
 # -------------------- Debug Info Helpers --------------------
-def _build_stac_debug_url(year: int, bbox: list, orbit_direction: str = None) -> str:
+def _build_stac_debug_url(year: int, bbox: list, orbit_direction: str | None = None) -> str:
     """Build a STAC API URL for debugging (can be opened in browser/curl)."""
     base = "https://planetarycomputer.microsoft.com/api/stac/v1/search"
     params = {
@@ -521,7 +522,7 @@ def _build_stac_debug_info(
     }
 
 
-def _quarter_windows(year: int):
+def _quarter_windows(year: int) -> dict[str, tuple[str, str]]:
     # Same quarter “center-ish” windows used, dont @ me.
     return {
         "Q1": (f"{year}-01-15", f"{year}-03-15"),
@@ -530,16 +531,16 @@ def _quarter_windows(year: int):
         "Q4": (f"{year}-10-15", f"{year}-12-15"),
     }
 
-def get_quarterly_scenes_by_coverage(items: list, year: int, tile_bounds: tuple,
+def get_quarterly_scenes_by_coverage(items: list[Item], year: int, tile_bounds: tuple,
                                      coverage_threshold: float = 0.95,
-                                     k_scenes: int = 3) -> tuple:
+                                     k_scenes: int = 3) -> tuple[dict[str, list[Item]], list[dict]]:
     """Select top-k days per quarter based on combined daily coverage.
 
     Groups items by solar day and calculates combined coverage (union of footprints)
     for each day. This allows edge-of-swath scenes to be combined for better coverage.
     """
     quarters = _quarter_windows(year)
-    selected = {}
+    selected: dict[str, list[Item]] = {}
     quarter_meta = []
 
     for q_name, (start, end) in quarters.items():
@@ -579,7 +580,7 @@ def get_quarterly_scenes_by_coverage(items: list, year: int, tile_bounds: tuple,
         scored_days.sort(key=lambda t: t[0], reverse=True)
 
         # Select top-k days meeting threshold
-        top_k_days = []
+        top_k_days: list[tuple[float, str, list[Item]]] = []
         for coverage, day, day_items in scored_days[:k_scenes]:
             if coverage >= coverage_threshold or len(top_k_days) == 0:
                 top_k_days.append((coverage, day, day_items))
@@ -637,7 +638,7 @@ def composite_quarter_scenes(scene_arrays: list, method: str = "median") -> np.n
     out = np.where(np.isnan(out), 0, out)
     return out.astype(np.uint16)
 
-def _detect_vv_vh_assets(item) -> list:
+def _detect_vv_vh_assets(item: Item) -> list[str]:
     """Return asset keys in preferred order (vv,vh) if present; else best-effort detection."""
     keys = list(item.assets.keys())
     lower = {k.lower(): k for k in keys}
@@ -659,7 +660,7 @@ def _detect_vv_vh_assets(item) -> list:
                 found.append(k)
 
     # keep order vv then vh if both exist
-    def _rank(k):
+    def _rank(k: str) -> int:
         kl = k.lower()
         return 0 if "vv" in kl else (1 if "vh" in kl else 2)
     found = sorted(set(found), key=_rank)
@@ -705,13 +706,13 @@ def _search_stac_items(
     orbit_query: dict,
     max_attempts: int = 5,
     initial_backoff: float = 0.5,
-) -> tuple[list, int]:
+) -> tuple[list[Item], int]:
     """Search STAC with retry logic.
 
     Returns:
         Tuple of (items_list, attempt_count)
     """
-    def _do_search():
+    def _do_search() -> list[Item]:
         search = client.search(
             collections=[RTC_COLLECTION],
             datetime=f"{year}-01-01/{year}-12-31",
@@ -735,7 +736,7 @@ class QuarterResult:
     """Result of processing a single quarter."""
     quarter: str
     status: str  # 'success', 'failed', 'empty'
-    data: np.ndarray | None
+    data: np.ndarray
     items_loaded: int
     retry_count: int
     error_message: str | None = None
@@ -744,11 +745,11 @@ class QuarterResult:
 
 # -------------------- Quarter Loading with Retry --------------------
 def _sign_items_with_retry(
-    items: list,
+    items: list[Item],
     sas_token: str,
     bands: list,
     max_attempts: int = 3,
-) -> list:
+) -> list[Item]:
     """Sign items with retry, preferring pre-fetched SAS token."""
     if sas_token:
         apply_sas_to_item_assets(items, sas_token, asset_keys=bands)
@@ -757,7 +758,7 @@ def _sign_items_with_retry(
     # Fallback: sign each item individually with retry
     signed_items = []
     for item in items:
-        def _sign_single(it=item):
+        def _sign_single(it: Item = item) -> Item:
             return pc.sign(it)
 
         signed_item, _ = retry_with_backoff(
@@ -774,10 +775,10 @@ def _sign_items_with_retry(
 
 def _load_quarter_with_retry(
     quarter_name: str,
-    items: list,
+    items: list[Item],
     bbox: list,
     resolution_m: int,
-    bands: list,
+    bands: list[str],
     sas_token: str,
     max_attempts: int = 3,
     fallback_shape: tuple = (512, 512),
@@ -797,14 +798,14 @@ def _load_quarter_with_retry(
     # Create working copy for re-signing
     working_items = items.copy()
 
-    def _re_sign_items():
+    def _re_sign_items() -> None:
         nonlocal working_items
         if sas_token:
             apply_sas_to_item_assets(working_items, sas_token, asset_keys=bands)
         else:
             working_items = [pc.sign(it) for it in items]
 
-    def _do_load():
+    def _do_load() -> np.ndarray | None:
         return load_quarter_items_odc(working_items, bbox, resolution_m, bands)
 
     try:
@@ -928,7 +929,7 @@ def main() -> dict | None:
 
     if args.orbit_direction.upper() == "AUTO":
         # Query without orbit filter to get all items
-        stac_query = {}
+        stac_query: dict[str, Any] = {}
         items, stac_attempts = _search_stac_items(
             client, args.year, bbox2geojson(bbx), stac_query
         )
@@ -1036,7 +1037,7 @@ def main() -> dict | None:
     logger.info(f"Using asset keys: {bands}")
 
     quarter_results: dict[str, QuarterResult] = {}
-    quarter_band_stats = {q: {} for q in ["Q1", "Q2", "Q3", "Q4"]}
+    quarter_band_stats: dict[str, dict[str, dict]] = {q: {} for q in ["Q1", "Q2", "Q3", "Q4"]}
 
     # Process each quarter using odc.stac with retry
     for q_name in ["Q1", "Q2", "Q3", "Q4"]:
@@ -1070,7 +1071,7 @@ def main() -> dict | None:
                 logger.warning(f"Failed computing band stats for {q_name}: {e}")
 
     # Collect only successful quarter data (exclude failed quarters from output)
-    successful_quarters = []
+    successful_quarters: list[np.ndarray] = []
     successful_quarter_names = []
     quarter_days_map = {"Q1": 45, "Q2": 135, "Q3": 225, "Q4": 315}
 
@@ -1105,7 +1106,7 @@ def main() -> dict | None:
     max_h = max(a.shape[1] for a in successful_quarters)
     max_w = max(a.shape[2] for a in successful_quarters)
 
-    def _pad(arr):
+    def _pad(arr: np.ndarray) -> np.ndarray:
         pad_b = max_bands - arr.shape[0]
         pad_h = max_h - arr.shape[1]
         pad_w = max_w - arr.shape[2]

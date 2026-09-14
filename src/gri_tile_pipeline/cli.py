@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import click
 from loguru import logger
 
@@ -11,7 +13,7 @@ from gri_tile_pipeline.cli_context import (
     resolve_git_sha,
     resolve_pipeline_version,
 )
-from gri_tile_pipeline.config import load_config
+from gri_tile_pipeline.config import PipelineConfig, load_config
 from gri_tile_pipeline.exit_codes import ExitCode, exit_code_from_tracker
 from gri_tile_pipeline.logging import bind_run_context, new_run_id, setup_logging
 
@@ -52,9 +54,10 @@ from gri_tile_pipeline.logging import bind_run_context, new_run_id, setup_loggin
 @click.option("--run-id", default=None, help="Override auto-generated run ID.")
 @click.option("--show-config", is_flag=True, help="Print resolved config as YAML and exit.")
 @click.pass_context
-def gri_ttc(ctx: click.Context, config_path, log_level, log_format, verbose, quiet,
-            json_mode, workers, dry_run, yes, aws_profile, run_history_dir,
-            run_id, show_config):
+def gri_ttc(ctx: click.Context, config_path: str | None, log_level: str | None,
+            log_format: str, verbose: int, quiet: bool, json_mode: bool, workers: int,
+            dry_run: bool, yes: bool, aws_profile: str | None, run_history_dir: str,
+            run_id: str | None, show_config: bool) -> None:
     """GRI TTC tile pipeline."""
     if verbose and quiet:
         raise click.UsageError("-v and -q are mutually exclusive.")
@@ -289,7 +292,7 @@ def polygons_missing_ttc(
 # ---------------------------------------------------------------------------
 
 @gri_ttc.group()
-def tiles():
+def tiles() -> None:
     """Tile-CSV utilities: missing, split, validate."""
 
 @tiles.command("missing")
@@ -575,7 +578,8 @@ def report(
 @click.option("-o", "--output", default=None, type=click.Path(),
               help="Output CSV for the dropped-polygon report.")
 @click.pass_context
-def audit_drops(ctx, request_csv, stats_csv, geoparquet, output):
+def audit_drops(ctx: click.Context, request_csv: str, stats_csv: str,
+                 geoparquet: str, output: str | None) -> None:
     """Audit polygons that were dropped during a pipeline run, classify by cause."""
     import pandas as pd
     from gri_tile_pipeline.cli_context import emit_json, get as get_ctx
@@ -651,7 +655,7 @@ def preview_polygon(
 # ---------------------------------------------------------------------------
 
 @gri_ttc.group()
-def runs():
+def runs() -> None:
     """Query saved run history (list, show, failed, retry)."""
 
 
@@ -1331,7 +1335,8 @@ def cost(ctx: click.Context, tiles_csv: str, mem: int | None, include_predict: b
         click.echo(f"  Grand total: ${result['grand_total']:.2f}")
 
 
-def cost_function(cfg, tiles_csv: str, mem: int | None = None, include_predict: bool = False):
+def cost_function(cfg: PipelineConfig, tiles_csv: str, mem: int | None = None,
+                   include_predict: bool = False) -> dict[str, Any]:
     """Estimate Lambda costs for a tile pipeline run.
 
     Mirrors the arguments of the ``cost`` CLI command so it can be invoked

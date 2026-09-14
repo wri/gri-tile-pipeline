@@ -13,7 +13,7 @@ def make_s3_store(
     region: str,
     profile: str | None = None,
     prefix: str | None = None,
-):
+) -> obs.store.ObjectStore:
     """Build an obstore S3Store authenticated via boto3's credential chain.
 
     obstore doesn't read ``AWS_PROFILE`` natively, so we delegate credential
@@ -55,7 +55,7 @@ def make_s3_store(
     return S3Store(bucket, **kwargs)
 
 
-def from_dest(dest: str, *, region: str = "us-east-1", profile: str | None = None):
+def from_dest(dest: str, *, region: str = "us-east-1", profile: str | None = None) -> obs.store.ObjectStore:
     """Build an obstore Store from an ``s3://`` URI or local path.
 
     Uses :func:`make_s3_store` for S3 to inherit AWS credential chain
@@ -73,7 +73,7 @@ def from_dest(dest: str, *, region: str = "us-east-1", profile: str | None = Non
     return LocalStore(prefix=dest)
 
 
-def validate_aws(store, *, probe_key: str = "__aws_probe__") -> None:
+def validate_aws(store: obs.store.ObjectStore, *, probe_key: str = "__aws_probe__") -> None:
     """Probe *store* to surface auth/permission errors before fanning out.
 
     Raises the underlying obstore exception if the store cannot satisfy a
@@ -91,7 +91,7 @@ def validate_aws(store, *, probe_key: str = "__aws_probe__") -> None:
         raise
 
 
-def obstore_put_hkl(store, relpath: str, obj: object) -> None:
+def obstore_put_hkl(store: obs.store.ObjectStore, relpath: str, obj: object) -> None:
     """Serialize *obj* via hickle and write to *store* at *relpath*."""
     import hickle as hkl
 
@@ -108,6 +108,6 @@ def obstore_put_hkl(store, relpath: str, obj: object) -> None:
             pass
 
 
-def obstore_put_bytes(store, relpath: str, data: bytes) -> None:
+def obstore_put_bytes(store: obs.store.ObjectStore, relpath: str, data: bytes) -> None:
     """Write raw bytes to *store* at *relpath*."""
     obs.put(store, relpath, data)

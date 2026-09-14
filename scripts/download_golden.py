@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 import obstore as obs
+from obstore.store import ObjectStore
 
 from gri_tile_pipeline.storage.obstore_utils import from_dest
 from gri_tile_pipeline.storage.tile_paths import (
@@ -71,7 +72,7 @@ def _local_path_for_source(src: str, x: int, y: int) -> Path:
     return GOLDEN_RAW / src / f"{tag}.hkl"
 
 
-def _download(store: obs.Store, key: str, dest_path: Path, *, force: bool) -> tuple[bool, str]:
+def _download(store: ObjectStore, key: str, dest_path: Path, *, force: bool) -> tuple[bool, str]:
     """Download a single object. Returns (success, status)."""
     rel = dest_path.relative_to(REPO_ROOT)
     if dest_path.exists() and not force:

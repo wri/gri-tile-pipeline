@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import yaml
 from loguru import logger
@@ -104,7 +104,7 @@ def run_predict(
         lithops_cfg = yaml.safe_load(f)
     lithops_cfg.setdefault("aws_lambda", {})["runtime"] = runtime
 
-    base_kwargs: List[Dict[str, Any]] = [
+    base_kwargs: list[dict[str, Any]] = [
         {
             "year": t["year"],
             "lon": t["lon"],
@@ -122,7 +122,7 @@ def run_predict(
     fexec = FunctionExecutor(config=lithops_cfg, runtime=runtime, runtime_memory=memory_mb)
     retry_exec = lithops.RetryingFunctionExecutor(fexec)
 
-    futures: List[Tuple[RetryingFuture, str, str, Dict[str, Any]]] = []
+    futures: list[tuple[RetryingFuture, str, str, dict[str, Any]]] = []
     for kw in base_kwargs:
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures.append((
