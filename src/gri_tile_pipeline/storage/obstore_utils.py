@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from typing import Any
 
 import obstore as obs
 from obstore.store import LocalStore
@@ -49,7 +50,7 @@ def make_s3_store(
 
     session = boto3.Session(profile_name=profile)  # None is fine here
     credential_provider = Boto3CredentialProvider(session)
-    kwargs = {"region": region, "credential_provider": credential_provider}
+    kwargs: dict[str, Any] = {"region": region, "credential_provider": credential_provider}
     if prefix:
         kwargs["prefix"] = prefix
     return S3Store(bucket, **kwargs)
@@ -66,8 +67,8 @@ def from_dest(dest: str, *, region: str = "us-east-1", profile: str | None = Non
     """
     if dest.startswith("s3://"):
         rest = dest[len("s3://"):]
-        bucket, _, prefix = rest.partition("/")
-        prefix = prefix.rstrip("/") or None
+        bucket, _, prefix_part = rest.partition("/")
+        prefix: str | None = prefix_part.rstrip("/") or None
         return make_s3_store(bucket, region=region, profile=profile, prefix=prefix)
     os.makedirs(dest, exist_ok=True)
     return LocalStore(prefix=dest)

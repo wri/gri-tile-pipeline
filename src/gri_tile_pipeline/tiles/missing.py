@@ -14,6 +14,7 @@ missing that year's value.
 from __future__ import annotations
 
 from datetime import datetime
+from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
@@ -38,7 +39,7 @@ def generate_missing_tiles(
     *,
     short_name: str | None = None,
     framework_key: str | None = None,
-    polygon_ids: list[UUID] | None = None,
+    polygon_ids: Sequence[UUID | str] | None = None,
 ) -> list[dict[str, Any]]:
     """Spatial join polygons-with-missing-ttc against the tile grid.
 
@@ -168,7 +169,7 @@ def list_polygons_missing_ttc(
     *,
     short_name: str | None = None,
     framework_key: str | None = None,
-    polygon_ids: list[UUID] | None = None,
+    polygon_ids: Sequence[UUID | str] | None = None,
     ) -> list[dict[str, Any]]:
     """
     Returns polygon ids for polygons missing ttc for specified outermost project phase.
@@ -265,7 +266,7 @@ def _missing_ttc_where(
         current_year: int,
         short_name: str | None,
         framework_key: str | None,
-        polygon_ids: list[UUID] | None,
+        polygon_ids: Sequence[UUID | str] | None,
         params: list[Any]) -> str:
     """Build the missing-ttc WHERE clause, appending bind values to ``params``.
 

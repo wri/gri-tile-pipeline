@@ -1569,6 +1569,10 @@ def run(
         logger.info(f"Step: mosaic ({n} tiles, year={year}) -> {mosaic_output}")
         from gri_tile_pipeline.steps.mosaic import run_mosaic
 
+        # Guaranteed non-None by the "--year is required when 'mosaic' is
+        # in --steps" UsageError check above; mypy can't see across that
+        # separate if-block, so assert to narrow for the type checker.
+        assert year is not None
         run_mosaic(tiles, dest, year, mosaic_output, cfg, polygons_path=polygons)
 
     # -- Stats --
@@ -1577,6 +1581,11 @@ def run(
         from gri_tile_pipeline.steps.zonal_stats import run_zonal_stats
 
         tiles_bucket = dest.replace("s3://", "").split("/")[0] if dest.startswith("s3://") else dest
+        # Guaranteed non-None by the "--polygons"/"--year is required when
+        # 'stats' is in --steps" UsageError checks above; same cross-block
+        # narrowing limitation as the mosaic step.
+        assert polygons is not None
+        assert year is not None
         run_zonal_stats(polygons, tiles_bucket, year, output, cfg)
 
     any_failed = dl_exit != ExitCode.SUCCESS or pred_exit != ExitCode.SUCCESS
@@ -1667,7 +1676,7 @@ def tm_patch(
 
     try:
         base_url_resolved, token_resolved = resolve_tm_creds(
-            tm_env, token=token, base_url=base_url,
+            tm_env, token=token, base_url=base_url,  # type: ignore[arg-type]
         )
     except MissingTMCredential as e:
         raise click.ClickException(str(e))
@@ -1850,16 +1859,16 @@ def doctor(ctx: click.Context, check_tm: bool, tm_env: str) -> None:
 @click.pass_context
 def run_project(
     ctx: click.Context,
-    short_name: str,
+    short_name: str | None,
     input_csv: str | None,
-    project_ids: list[str] | None,
-    short_names_opt: list[str] | None,
-    framework_keys: list[str] | None,
-    poly_uuids: list[str] | None,
-    cohorts: list[str] | None,
+    project_ids: tuple[str, ...],
+    short_names_opt: tuple[str, ...],
+    framework_keys: tuple[str, ...],
+    poly_uuids: tuple[str, ...],
+    cohorts: tuple[str, ...],
     where_sql: str | None,
     dest: str,
-    geoparquet: bool,
+    geoparquet: str,
     year: int | None,
     output: str,
     local: bool,
@@ -1922,6 +1931,7 @@ def run_project(
         cfg.zonal.shift_error_enabled = shift_error
 
     if not dry_run and not check_only and not yes:
+        source: str | None
         if has_filter:
             source = "filter"
         else:
@@ -1935,6 +1945,13 @@ def run_project(
 
     if tm_patch_enabled and not tm_patch_project_id:
         raise click.UsageError("--tm-patch requires --tm-patch-project-id.")
+    # `year` is otherwise optional here (run_project_pipeline can derive a
+    # per-polygon prediction year from plantstart when omitted), but
+    # _invoke_tm_patch's TerraMatch patch request needs one concrete value
+    # — without this, --tm-patch without --year would previously reach
+    # _invoke_tm_patch with year=None despite its `year: int` signature.
+    if tm_patch_enabled and year is None:
+        raise click.UsageError("--tm-patch requires --year.")
 
     try:
         result = run_project_pipeline(
@@ -1974,6 +1991,10 @@ def run_project(
         and not dry_run
         and not check_only
     ):
+        # Guaranteed non-None by the "--tm-patch requires ..." UsageError
+        # checks above; mypy can't see across that separate if-block.
+        assert tm_patch_project_id is not None
+        assert year is not None
         _invoke_tm_patch(
             ctx,
             results_csv=results_path,

@@ -88,7 +88,7 @@ class JobTracker:
 
         phase_aggregates = self._phase_aggregates()
 
-        summary = {
+        summary: dict[str, Any] = {
             "run_id": run_id,
             "step": step,
             "start_time": self.start_time.isoformat(),

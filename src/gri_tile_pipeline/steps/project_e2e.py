@@ -496,6 +496,9 @@ def run_project_pipeline(
         )
     else:
         logger.info(f"Step 1/7: Extracting project '{short_name}' from {geoparquet}")
+        # Reaching this branch means input_csv and has_filter are both falsy,
+        # and sources_provided == 1 (checked above), so short_name must be truthy.
+        assert short_name is not None
         gdf, geojson_path, meta = _extract_project(short_name, geoparquet, year_override=year)
 
     label = meta["label"]

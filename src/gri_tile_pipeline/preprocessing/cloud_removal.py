@@ -402,7 +402,9 @@ def identify_clouds_shadows(
                 close[0] -= 1
         if len(close) == 2:
             if close[-1] >= (img.shape[0] - 2) and img.shape[0] > 3:
-                close = np.concatenate([np.array([close[0] - 1]), close])
+                # Keep `close` a plain list of ints (its type throughout the
+                # rest of this loop) rather than letting it become an ndarray.
+                close = np.concatenate([np.array([close[0] - 1]), close]).tolist()
 
         ri_ref = np.copy(img[..., [0, 1, 2]])
         if img.shape[0] > 2:
@@ -509,8 +511,10 @@ def identify_clouds_shadows(
         shadows[i][toremove] = 0.0
 
     # NIR/SWIR ratio false positive removal
-    nir_swir_ratio = img[..., 3] / (img[..., 8] + 0.01)
-    nir_swir_ratio = nir_swir_ratio < 0.75
+    # Keep `nir_swir_ratio` a single boolean-mask type throughout (the ratio
+    # itself is only an intermediate value, never used after thresholding).
+    nir_swir_ratio_value = img[..., 3] / (img[..., 8] + 0.01)
+    nir_swir_ratio = nir_swir_ratio_value < 0.75
     nir_swir_ratio = binary_dilation(nir_swir_ratio, iterations=3)
     for i in range(clouds.shape[0]):
         mini = max(i - 1, 0)
@@ -881,7 +885,13 @@ def align_interp_array_lr(
             if seed is not None:
                 random.seed(seed + date)
             for a in [p2, p98, p20, p40, p60, p80, p100]:
-                random.shuffle(a)
+                # random.shuffle works fine in-place on an ndarray at runtime
+                # (it only needs __len__/__getitem__/__setitem__); typeshed
+                # types the parameter as MutableSequence[Any], which ndarray
+                # doesn't structurally satisfy. Using np.random.shuffle here
+                # instead would draw from a different RNG than the
+                # random.seed() call above, so keep random.shuffle.
+                random.shuffle(a)  # type: ignore[arg-type]
 
             p20 = p20[:n_samples_i]
             p40 = p40[:n_samples_i]
@@ -889,7 +899,7 @@ def align_interp_array_lr(
             p80 = p80[:n_samples_i]
             p100 = p100[:n_samples_i]
             random_sample = np.concatenate([p2, p20, p40, p60, p80, p100, p98])
-            random.shuffle(random_sample)
+            random.shuffle(random_sample)  # type: ignore[arg-type]  # see note above
 
             random_sample = random_sample[: non_interp_mid_mosaic.shape[0]]
             random_sample = random_sample[: non_interp_mid_areas.shape[0]]
