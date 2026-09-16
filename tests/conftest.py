@@ -14,12 +14,17 @@ from gri_shared_library.productivity_tools import (download_ttc_test_data)
 from gri_shared_library.geoparquet_tools import clear_ttc_for_test_projects, thin_tm_geoparquet_to_test_projects
 from tests.constants import ARD_DIR, REFERENCE_TIF, MODEL_DIR
 
+GOLDEN_PREFIX = "test_golden_"
+VALID_MODES = ("include", "exclude", "only")
+
+
 # ---------------------------------------------------------------------------
 # Fixtures — paths
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
 def ard_dir() -> Path:
+    os.makedirs(ARD_DIR, exist_ok=True)
     if not ARD_DIR.is_dir():
         pytest.skip(f"ARD directory not found: {ARD_DIR}")
     return ARD_DIR
@@ -108,15 +113,96 @@ def _teardown_test_data():
         assert not os.path.exists(TERRAMATCH_GEOPARQUET_FILEPATH)
 
 
+@pytest.hookimpl(tryfirst=True)  # must run before xdist's own pytest_configure
 def pytest_configure(config):
-    # Runs on the controller before any worker is spawned -> setup happens once,
-    # and the data files are on disk before the workers start
-    # collecting/running.
     if _is_controller(config):
+        # Runs on the controller before any worker is spawned -> setup happens once,
+        # and the data files are on disk before the workers start
+        # collecting/running.
         _setup_test_data()
+
+    mode = _golden_mode(config)
+    config._golden_mode = mode
+
+    if mode != "only":
+        return  # only cap workers for the dedicated golden-only run
+
+    if not hasattr(config.option, "numprocesses"):
+        return  # pytest-xdist isn't installed/active - nothing to cap
+
+    raw = config.getini("golden_max_workers")
+    if raw:
+        max_workers = int(raw)
+    else:
+        headroom = int(config.getini("golden_worker_headroom"))
+        max_workers = max(1, (os.cpu_count() or 1) - headroom)
+
+    requested = config.option.numprocesses  # None, 0, "auto", "logical", or an int
+    try:
+        new_value = min(int(requested), max_workers)
+    except (TypeError, ValueError):
+        # None, 0, "auto", "logical" all fall here -> force the capped value
+        new_value = max_workers
+
+    config.option.numprocesses = new_value
 
 
 def pytest_unconfigure(config):
     # Runs on the controller after all workers have finished -> teardown once.
     if _is_controller(config):
         _teardown_test_data()
+
+
+def pytest_addoption(parser):
+    parser.addini(
+        "golden_tests",
+        help="How to handle tests named 'test_golden_*': "
+             "'include' (run everything, default), 'exclude' (skip golden tests), "
+             "'only' (run only golden tests).",
+        default="include",
+    )
+    parser.addini(
+        "golden_max_workers",
+        help="Absolute cap on xdist workers when golden_tests=only. "
+             "Leave blank to derive it from golden_worker_headroom instead.",
+        default="",
+    )
+    parser.addini(
+        "golden_worker_headroom",
+        help="When golden_max_workers is blank, use (vCPU count - this many) workers "
+             "for golden-only runs. Default: 2.",
+        default="2",
+    )
+    parser.addoption(
+        "--golden",
+        choices=VALID_MODES,
+        default=None,
+        help="Override the golden_tests ini setting for this run.",
+    )
+
+
+def _golden_mode(config):
+    mode = config.getoption("golden") or config.getini("golden_tests")
+    if mode not in VALID_MODES:
+        raise pytest.UsageError(
+            f"invalid golden_tests value {mode!r}; must be one of {VALID_MODES}"
+        )
+    return mode
+
+
+def pytest_collection_modifyitems(config, items):
+    mode = getattr(config, "_golden_mode", None) or _golden_mode(config)
+
+    if mode == "include":
+        return
+
+    if mode == "exclude":
+        marker = pytest.mark.skip(reason="excluded: golden_tests=exclude")
+        target = lambda name: name.startswith(GOLDEN_PREFIX)
+    else:  # mode == "only"
+        marker = pytest.mark.skip(reason="skipped: golden_tests=only")
+        target = lambda name: not name.startswith(GOLDEN_PREFIX)
+
+    for item in items:
+        if target(item.name):
+            item.add_marker(marker)

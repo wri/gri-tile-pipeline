@@ -81,7 +81,7 @@ members = ["packages/gri-tile-loaders"]
 
 [tool.uv.sources]
 gri-tile-loaders = { workspace = true }
-gri-shared-library = { git = "https://github.com/wri/gri-shared-library.git", branch = "develop"}
+gri-shared-library = { git = "https://github.com/wri/gri-shared-library.git", branch = "change_constants"}
 #gri-shared-library = { path = "/home/kennc/github/gri-shared-library"}
 
 [tool.ruff.lint.per-file-ignores]
@@ -95,6 +95,9 @@ gri-shared-library = { git = "https://github.com/wri/gri-shared-library.git", br
 "tests/parity/test_lambda_parity.py" = ["E402"]
 
 [tool.pytest.ini_options]
+golden_tests = "exclude"       # exclude | include | only  (exclude is the default)
+golden_max_workers = ""        # blank = derive from headroom below
+golden_worker_headroom = "2"   # workers = vCPU count - 2 (min 1) when golden_tests=only
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
