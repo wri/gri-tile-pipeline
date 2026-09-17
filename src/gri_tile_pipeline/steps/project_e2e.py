@@ -100,7 +100,7 @@ def _extract_project(
     if year_override is not None:
         gdf["pred_year"] = year_override
     else:
-        def _derive_year(ps):
+        def _derive_year(ps: Any) -> int | None:
             if ps is not None and hasattr(ps, "year"):
                 return ps.year - 1
             return None
@@ -282,7 +282,7 @@ def _extract_by_filter(
     if year_override is not None:
         gdf["pred_year"] = year_override
     else:
-        def _derive_year(ps):
+        def _derive_year(ps: Any) -> int | None:
             if ps is not None and hasattr(ps, "year"):
                 return ps.year - 1
             return None

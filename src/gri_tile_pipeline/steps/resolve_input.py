@@ -13,10 +13,15 @@ from __future__ import annotations
 import csv as csv_mod
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 from gri_shared_library.os_tools import get_project_root_dir
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    import geopandas as gpd
+
+    from gri_tile_pipeline.config import PipelineConfig
 
 PROJECT_ROOT_DIR: str = get_project_root_dir()
 
@@ -25,11 +30,11 @@ PROJECT_ROOT_DIR: str = get_project_root_dir()
 class ResolvedInput:
     """Result of resolving an input file to tiles."""
 
-    tiles: List[Dict[str, Any]]
+    tiles: list[dict[str, Any]]
     input_type: str  # tiles_csv, request_csv, polygon_file, json_request
-    polygons_gdf: Any = None  # Optional GeoDataFrame
-    polygons_path: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    polygons_gdf: "gpd.GeoDataFrame | None" = None
+    polygons_path: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 TILES_CSV_COLUMNS: set[str] = {"Year", "X", "Y", "X_tile", "Y_tile"}
@@ -85,7 +90,7 @@ def detect_input_type(path: str) -> str:
 
 def resolve_to_tiles(
     input_path: str | None,
-    cfg,
+    cfg: "PipelineConfig",
     *,
     year: int | None = None,
     year_from_plantstart: bool = False,
@@ -168,7 +173,7 @@ def resolve_to_tiles(
 
 def _resolve_by_filter(
     geoparquet: str,
-    cfg,
+    cfg: "PipelineConfig",
     *,
     year: int | None,
     where_sql: str | None,

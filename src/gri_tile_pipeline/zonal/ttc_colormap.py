@@ -33,7 +33,14 @@ _STOPS: list[tuple[int, RGBA]] = [
 
 
 def _lerp_color(c0: RGBA, c1: RGBA, t: float) -> RGBA:
-    return tuple(round(a + (b - a) * t) for a, b in zip(c0, c1))  # type: ignore[return-value]
+    # Unpack explicitly (rather than a generic tuple(...) comprehension) so the
+    # return value is provably a 4-tuple matching RGBA, with no type: ignore
+    # needed to paper over mypy not being able to prove that length statically.
+    r = round(c0[0] + (c1[0] - c0[0]) * t)
+    g = round(c0[1] + (c1[1] - c0[1]) * t)
+    b = round(c0[2] + (c1[2] - c0[2]) * t)
+    a = round(c0[3] + (c1[3] - c0[3]) * t)
+    return (r, g, b, a)
 
 
 def build_ttc_colormap() -> dict[int, RGBA]:

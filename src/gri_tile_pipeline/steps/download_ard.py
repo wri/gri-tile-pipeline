@@ -10,7 +10,7 @@ by default.  The legacy Earth Search GRD-based S1 loader is available via
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import yaml
 from loguru import logger
@@ -45,10 +45,10 @@ PRICE_PER_GB_SEC: float = 0.00001667
 AVG_DURATIONS: dict[str, int] = {"DEM": 9, "S1": 14, "S2": 62}
 
 
-def estimate_cost(num_tiles: int, memory_mb: int) -> Dict[str, float]:
+def estimate_cost(num_tiles: int, memory_mb: int) -> dict[str, float]:
     """Return per-task-type and total estimated Lambda costs."""
     mem_gb = memory_mb / 1024.0
-    costs = {}
+    costs: dict[str, float] = {}
     for task, avg_sec in AVG_DURATIONS.items():
         costs[task] = num_tiles * avg_sec * mem_gb * PRICE_PER_GB_SEC
     costs["total"] = sum(costs.values())
@@ -132,7 +132,7 @@ def run_download_ard(
     cfg_usw2.setdefault("aws_lambda", {})["runtime"] = runtime
     cfg_s1.setdefault("aws_lambda", {})["runtime"] = cfg.s1_rtc.runtime
 
-    base_kwargs: List[Dict[str, Any]] = [
+    base_kwargs: list[dict[str, Any]] = [
         {
             "year": t["year"],
             "lon": t["lon"],
@@ -157,7 +157,7 @@ def run_download_ard(
     retry_s1 = lithops.RetryingFunctionExecutor(fexec_s1)
 
     # DEM -> eu-central-1
-    futures_euc1: List[Tuple[RetryingFuture, str, str, Dict[str, Any]]] = []
+    futures_euc1: list[tuple[RetryingFuture, str, str, dict[str, Any]]] = []
     for kw in base_kwargs:
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures_euc1.append((
@@ -170,7 +170,7 @@ def run_download_ard(
 
     # S1 RTC -> us-west-2 (Planetary Computer)
     s1_retries = retries if retries is not None else cfg.s1_rtc.retries
-    futures_s1: List[Tuple[RetryingFuture, str, str, Dict[str, Any]]] = []
+    futures_s1: list[tuple[RetryingFuture, str, str, dict[str, Any]]] = []
     for kw in base_kwargs:
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         s1_kw = {**kw, "sas_token": pc_sas_token}
@@ -183,7 +183,7 @@ def run_download_ard(
         ))
 
     # S2 -> us-west-2
-    futures_usw2: List[Tuple[RetryingFuture, str, str, Dict[str, Any]]] = []
+    futures_usw2: list[tuple[RetryingFuture, str, str, dict[str, Any]]] = []
     for kw in base_kwargs:
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures_usw2.append((

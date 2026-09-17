@@ -38,7 +38,7 @@ def _expected_keys(tile: Dict[str, Any], check_type: str) -> List[str]:
 
 
 async def _check_tiles_async(
-    store: obs.Store,
+    store: obs.store.ObjectStore,
     tiles: List[Dict[str, Any]],
     check_type: str,
 ) -> Dict[str, List[Dict[str, Any]]]:
@@ -71,7 +71,7 @@ def check_availability(
     *,
     check_type: str = "raw_ard",
     region: str = "us-east-1",
-    store: obs.Store | None = None,
+    store: obs.store.ObjectStore | None = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """Check which tiles already have outputs on S3.
 
@@ -116,7 +116,7 @@ def filter_missing_tiles(
     *,
     check_type: str = "raw_ard",
     region: str = "us-east-1",
-    store: obs.Store | None = None,
+    store: obs.store.ObjectStore | None = None,
 ) -> List[Dict[str, Any]]:
     """Convenience wrapper: return only the tiles that are missing from *dest*."""
     result = check_availability(
@@ -146,7 +146,7 @@ def _keys_for_sources(tile: Dict[str, Any], sources: tuple[str, ...]) -> dict[st
 
 
 async def _check_sources_async(
-    store,
+    store: obs.store.ObjectStore,
     tiles: List[Dict[str, Any]],
     sources: tuple[str, ...],
 ) -> Dict[tuple[int, int, int], Dict[str, bool]]:
@@ -225,7 +225,7 @@ def check_availability_by_source(
     *,
     sources: tuple[str, ...] = AVAILABLE_SOURCES,
     region: str = "us-east-1",
-    store: obs.Store | None = None,
+    store: obs.store.ObjectStore | None = None,
 ) -> Dict[tuple[int, int, int], Dict[str, bool]]:
     """Per-source availability map: ``{(year, X_tile, Y_tile): {source: present, ...}}``.
 

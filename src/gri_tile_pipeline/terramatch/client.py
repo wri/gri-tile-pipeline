@@ -11,9 +11,12 @@ Deliberately minimal: no retries, no async. Callers layer policy on top.
 
 from __future__ import annotations
 
-from typing import Any, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Iterator
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    import requests
 
 DEFAULT_STAGING_URL: str = "https://api-staging.terramatch.org/research/v3"
 DEFAULT_PRODUCTION_URL: str = "https://api.terramatch.org/research/v3"
@@ -33,7 +36,7 @@ class TMClient:
         self,
         base_url: str,
         token: str,
-        session: Any = None,
+        session: "requests.Session | None" = None,
         timeout: float = 30.0,
     ) -> None:
         import requests
@@ -44,7 +47,7 @@ class TMClient:
         self.timeout = timeout
         self._headers = {"Authorization": f"Bearer {token}"}
 
-    def _get(self, path: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         logger.debug(f"TM GET {url} params={params}")
         resp = self.session.get(
