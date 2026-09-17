@@ -45,10 +45,11 @@ jobs:
           execute_install_scripts: true
 
       # Step 5: Run tests
+      # The ard-file=exclude setting ensures that the tests which require ARD tiles are not executed.
       - name: Run Tests
         run: |
           if [ -f "secrets.yaml" ]; then
             echo "Aborting tests to avoid unintended execution.."
             exit 1
           fi
-          uv run pytest tests/
+          uv run pytest tests/ --ard-file exclude

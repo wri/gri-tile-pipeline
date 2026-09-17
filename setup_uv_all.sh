@@ -6,5 +6,3 @@ export GIT_CONFIG_VALUE_0="https://github.com/"
 uv lock --upgrade # -U
 uv sync --extra all
 source .venv/bin/activate
-uv run python scripts/download_golden.py
-

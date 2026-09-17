@@ -9,7 +9,7 @@ skip with "Golden test data not found".
 Also pulls one extra reference tile (1000X871Y) into example/raw_v2/,
 using the same set of raw ARD sources as the golden tiles above (s2_10,
 s2_20, s1, dem, s2_dates, clouds) plus its FINAL tif - just rooted at
-example/raw_v2/ instead of example/golden/, and with the tif written
+example/sample_ard/raw_v2/ instead of example/golden/, and with the tif written
 flat rather than nested. Independent of the golden fixture set above.
 
 Usage:
@@ -29,13 +29,13 @@ Writes (golden tiles):
     example/golden/{tile}_FINAL.tif
 
 Writes (reference tile - same source set as golden tiles):
-    example/raw_v2/s2_10/1000X871Y.hkl
-    example/raw_v2/s2_20/1000X871Y.hkl
-    example/raw_v2/s1/1000X871Y.hkl
-    example/raw_v2/misc/dem_1000X871Y.hkl
-    example/raw_v2/misc/s2_dates_1000X871Y.hkl
-    example/raw_v2/clouds/clouds_1000X871Y.hkl
-    example/raw_v2/1000X871Y_FINAL.tif
+    example/sample_ard/raw_v2/s2_10/1000X871Y.hkl
+    example/sample_ard/raw_v2/s2_20/1000X871Y.hkl
+    example/sample_ard/raw_v2/s1/1000X871Y.hkl
+    example/sample_ard/raw_v2/misc/dem_1000X871Y.hkl
+    example/sample_ard/raw_v2/misc/s2_dates_1000X871Y.hkl
+    example/sample_ard/raw_v2/clouds/clouds_1000X871Y.hkl
+    example/sample_ard/raw_v2/1000X871Y_FINAL.tif
 
 example/ is gitignored, so this only touches the local working tree.
 """
@@ -59,7 +59,7 @@ REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 EXAMPLE_DIR: Path = REPO_ROOT / "example"
 GOLDEN_DIR: Path = EXAMPLE_DIR / "golden"
 GOLDEN_RAW: Path = GOLDEN_DIR / "raw"
-RAW_V2_DIR: Path = EXAMPLE_DIR / "raw_v2"
+RAW_V2_DIR: Path = EXAMPLE_DIR / "sample_ard" / "raw_v2"
 
 # Matches tests/conftest.py:GOLDEN_TILES.
 TILES: list[tuple[int, int]] = [
@@ -150,7 +150,7 @@ def _download_reference_tile(
     missing: list[str],
 ) -> None:
     """Download all raw ARD sources + the FINAL tif for a tile into
-    example/raw_v2/ - the same set of source files as
+    example/sample_ard/raw_v2/ - the same set of source files as
     _download_golden_tile, just rooted at RAW_V2_DIR instead of
     GOLDEN_RAW/GOLDEN_DIR."""
     tag = f"{x}X{y}Y"

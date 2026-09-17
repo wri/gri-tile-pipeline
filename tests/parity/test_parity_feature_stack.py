@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-ARD_DIR = REPO_ROOT / "example" / "raw_v2"
+ARD_DIR = REPO_ROOT / "example" / "sample_ard" / "raw_v2"
 
 has_ard = pytest.mark.skipif(
     not ARD_DIR.is_dir(), reason=f"ARD directory not found: {ARD_DIR}"
