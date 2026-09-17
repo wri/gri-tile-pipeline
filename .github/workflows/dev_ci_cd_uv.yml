@@ -44,6 +44,25 @@ jobs:
           version: 1.0
           execute_install_scripts: true
 
+      # Step 4b: Verify GDAL actually installed.
+      # cache-apt-pkgs-action can silently cache a failed/empty install (e.g.
+      # apt mirror desync) as if it succeeded, which then surfaces as
+      # confusing failures in unrelated tests instead of here. Self-heal with
+      # a direct apt-get install/retry (a fresh `apt-get update` often picks
+      # a different mirror replica), and fail loudly if GDAL still isn't usable.
+      - name: Verify GDAL CLI tools
+        run: |
+          for attempt in 1 2 3; do
+            if command -v gdalbuildvrt >/dev/null 2>&1; then
+              gdalbuildvrt --version
+              exit 0
+            fi
+            echo "gdalbuildvrt not found (attempt $attempt/3); installing directly"
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gdal-bin libgdal-dev
+          done
+          command -v gdalbuildvrt
+
       # Step 5: Run tests
       - name: Run Tests
         run: |
