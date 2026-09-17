@@ -12,12 +12,15 @@ s2_20, s1, dem, s2_dates, clouds) plus its FINAL tif - just rooted at
 example/sample_ard/raw_v2/ instead of example/golden/, and with the tif written
 flat rather than nested. Independent of the golden fixture set above.
 
+Each tile carries its own ARD year, so tiles can be pulled from
+different years in a single run.
+
 Usage:
     AWS_PROFILE=AWSAdministratorAccess-058755926933 \\
         uv run python scripts/download_golden.py
 
-    # Pick a different year or bucket:
-    uv run python scripts/download_golden.py --year 2024 --dest s3://other-bucket
+    # Pick a different bucket:
+    uv run python scripts/download_golden.py --dest s3://other-bucket
 
 Writes (golden tiles):
     example/golden/raw/s2_10/{tile}.hkl
@@ -61,21 +64,21 @@ GOLDEN_DIR: Path = EXAMPLE_DIR / "golden"
 GOLDEN_RAW: Path = GOLDEN_DIR / "raw"
 RAW_V2_DIR: Path = EXAMPLE_DIR / "sample_ard" / "raw_v2"
 
-# Matches tests/conftest.py:GOLDEN_TILES.
-TILES: list[tuple[int, int]] = [
-    (1000, 798),
-    (1000, 799),
-    (1000, 800),
+# Matches tests/conftest.py:GOLDEN_TILES. Each entry is (x, y, year) - the
+# year travels with the tile so tiles can come from different ARD years.
+TILES: list[tuple[int, int, int]] = [
+    (1000, 798, 2023),
+    (1000, 799, 2023),
+    (1000, 800, 2023),
 ]
 
 # Extra reference tile(s): the same raw ARD source set as the golden
 # tiles above, plus the FINAL tif, written into example/raw_v2/. Not part
-# of the golden fixture set.
-REFERENCE_TIF_TILES: list[tuple[int, int]] = [
-    (1000, 871),
+# of the golden fixture set. Each entry is (x, y, year).
+REFERENCE_TIF_TILES: list[tuple[int, int, int]] = [
+    (1000, 871, 2023),
 ]
 
-DEFAULT_YEAR: int = 2023
 DEFAULT_DEST: str = "s3://wri-restoration-geodata-ttc"
 
 
@@ -177,8 +180,6 @@ def main() -> int:
     )
     ap.add_argument("--dest", default=DEFAULT_DEST,
                     help=f"S3 root URI (default: {DEFAULT_DEST})")
-    ap.add_argument("--year", type=int, default=DEFAULT_YEAR,
-                    help=f"ARD year (default: {DEFAULT_YEAR})")
     ap.add_argument("--region", default="us-east-1")
     ap.add_argument("--profile", default=None,
                     help="AWS profile (else default credential chain).")
@@ -188,18 +189,18 @@ def main() -> int:
 
     store = from_dest(args.dest, region=args.region, profile=args.profile)
     total = len(TILES) + len(REFERENCE_TIF_TILES)
-    print(f"Downloading {total} object(s) for year={args.year} from {args.dest}")
+    print(f"Downloading {total} object(s) from {args.dest}")
     print(f"Golden target: {GOLDEN_DIR.relative_to(REPO_ROOT)}")
     print(f"Raw v2 target: {RAW_V2_DIR.relative_to(REPO_ROOT)} (same source set as golden)")
     print()
 
     missing: list[str] = []
 
-    for x, y in TILES:
-        _download_golden_tile(store, x, y, args.year, force=args.force, missing=missing)
+    for x, y, year in TILES:
+        _download_golden_tile(store, x, y, year, force=args.force, missing=missing)
 
-    for x, y in REFERENCE_TIF_TILES:
-        _download_reference_tile(store, x, y, args.year, force=args.force, missing=missing)
+    for x, y, year in REFERENCE_TIF_TILES:
+        _download_reference_tile(store, x, y, year, force=args.force, missing=missing)
 
     print()
     if missing:
