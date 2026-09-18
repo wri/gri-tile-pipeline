@@ -11,7 +11,7 @@ import yaml
 from loguru import logger
 
 
-LITHOPS_ENV_VAR = "LITHOPS_ENV"
+LITHOPS_ENV_VAR: str = "LITHOPS_ENV"
 
 
 def _lithops_paths_for_env(env: str) -> dict[str, str]:

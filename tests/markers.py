@@ -1,15 +1,15 @@
 import pytest
 import boto3
 
-from tests.constants import ARD_DIR, REFERENCE_TIF, MODEL_DIR, GOLDEN_DIR
+from tests.constants import ARD_RAW, REFERENCE_TIF, MODEL_DIR, GOLDEN_DIR
 
 # ---------------------------------------------------------------------------
 # Skip conditions
 # ---------------------------------------------------------------------------
 
 has_ard = pytest.mark.skipif(
-    not ARD_DIR.is_dir(),
-    reason=f"ARD directory not found: {ARD_DIR}",
+    not ARD_RAW.is_dir(),
+    reason=f"ARD directory not found: {ARD_RAW}",
 )
 has_reference = pytest.mark.skipif(
     not REFERENCE_TIF.is_file(),

@@ -39,13 +39,13 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 
 # Re-use the known-tile dictionary from the smoke script to avoid duplication.
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from predict_lambda_smoke import KNOWN_TILES, _check_ard
 
-TTC_BUCKET_REGION = "us-east-1"
+TTC_BUCKET_REGION: str = "us-east-1"
 
 
 def _git_sha() -> str:

@@ -19,10 +19,9 @@ import argparse
 import csv
 import os
 import sys
-from typing import List
 
 
-def chunk_sizes_sequence() -> List[int]:
+def chunk_sizes_sequence() -> list[int]:
     """Return the chunk sizes in order (first 4 special, then repeating 1600)."""
     return [100, 200, 400, 800]
 

@@ -16,11 +16,15 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Callable
 
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
 from gri_tile_pipeline.tiles.csv_io import write_tiles_csv
 
-_FORBIDDEN_SQL = re.compile(
+if TYPE_CHECKING:
+    import duckdb
+
+_FORBIDDEN_SQL: re.Pattern = re.compile(
     r"\b(DROP|DELETE|INSERT|UPDATE|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|ATTACH|COPY|PRAGMA)\b",
     re.IGNORECASE,
 )
@@ -37,14 +41,14 @@ def _validate_where_sql(where_sql: str) -> None:
         )
 
 
-HALF_TILE = 1.0 / 36
+HALF_TILE: float = 1.0 / 36
 
 
 @dataclass
 class ReportResult:
     scope: dict = field(default_factory=dict)
     coverage: dict = field(default_factory=dict)
-    tile_avail: dict | None = None
+    tile_avail: dict[str, Any] | None = None
     tiles_csv_path: str | None = None
     report_path: str | None = None
     report_markdown: str = ""
@@ -57,7 +61,7 @@ class ReportResult:
 # ---------------------------------------------------------------------------
 
 def _build_filter(
-    con,
+    con: "duckdb.DuckDBPyConnection",
     geoparquet: str,
     input_csv: str | None,
     project_ids: list[str],
@@ -66,9 +70,9 @@ def _build_filter(
     poly_uuids: list[str] | None = None,
     cohorts: list[str] | None = None,
     where_sql: str | None = None,
-) -> tuple[str, list]:
+) -> tuple[str, list[Any]]:
     conditions: list[str] = []
-    params: list = [geoparquet]
+    params: list[Any] = [geoparquet]
     idx = 2
     poly_uuids = poly_uuids or []
     cohorts = cohorts or []
@@ -150,9 +154,11 @@ def _build_filter(
 
 
 def resolve_scope(
-    con, geoparquet, input_csv, project_ids, short_names, framework_keys,
-    poly_uuids=None, cohorts=None, where_sql=None,
-) -> tuple[dict, str, list]:
+    con: "duckdb.DuckDBPyConnection", geoparquet: str, input_csv: str | None,
+    project_ids: list[str], short_names: list[str], framework_keys: list[str],
+    poly_uuids: list[str] | None = None, cohorts: list[str] | None = None,
+    where_sql: str | None = None,
+) -> tuple[dict[str, Any], str, list[Any]]:
     where, params = _build_filter(
         con, geoparquet, input_csv, project_ids, short_names, framework_keys,
         poly_uuids=poly_uuids, cohorts=cohorts, where_sql=where_sql,
@@ -191,7 +197,7 @@ def resolve_scope(
 # Phase 2: TTC Coverage
 # ---------------------------------------------------------------------------
 
-def check_ttc_coverage(con, geoparquet: str, where: str, params: list) -> dict:
+def check_ttc_coverage(con: "duckdb.DuckDBPyConnection", geoparquet: str, where: str, params: list[Any]) -> dict[str, Any]:
     rows = con.execute(
         f"""
         SELECT
@@ -229,7 +235,7 @@ def check_ttc_coverage(con, geoparquet: str, where: str, params: list) -> dict:
 # Phase 3: Tile Availability
 # ---------------------------------------------------------------------------
 
-def find_needed_tiles(con, geoparquet: str, tiledb: str, where: str, params: list) -> list[dict]:
+def find_needed_tiles(con: "duckdb.DuckDBPyConnection", geoparquet: str, tiledb: str, where: str, params: list[Any]) -> list[dict[str, Any]]:
     tiledb_idx = len(params) + 1
     tile_params = params + [tiledb]
     rows = con.execute(
@@ -264,9 +270,9 @@ def find_needed_tiles(con, geoparquet: str, tiledb: str, where: str, params: lis
 
 
 def check_s3(
-    tiles: list[dict], bucket: str, region: str,
+    tiles: list[dict[str, Any]], bucket: str, region: str,
     aws_profile: str | None, check_type: str,
-) -> dict:
+) -> dict[str, Any]:
     """Check which tiles exist on S3. Uses obstore_utils.make_s3_store + validate_aws."""
     from gri_tile_pipeline.storage.obstore_utils import make_s3_store, validate_aws
     from gri_tile_pipeline.tiles.availability import check_availability
@@ -280,7 +286,7 @@ def check_s3(
     existing = result["existing"]
     missing = result["missing"]
 
-    per_year: dict[int, dict] = {}
+    per_year: dict[int, dict[str, int]] = {}
     for t in tiles:
         yr = t["year"]
         per_year.setdefault(yr, {"needed": 0, "existing": 0, "missing": 0})
@@ -304,7 +310,7 @@ def check_s3(
 # Rendering
 # ---------------------------------------------------------------------------
 
-def _md_table(headers: list[str], rows: list[list], alignments: list[str] | None = None) -> str:
+def _md_table(headers: list[str], rows: list[list[Any]], alignments: list[str] | None = None) -> str:
     if not alignments:
         alignments = ["l"] * len(headers)
     lines = ["| " + " | ".join(headers) + " |"]
@@ -318,9 +324,9 @@ def _md_table(headers: list[str], rows: list[list], alignments: list[str] | None
 
 
 def render_report(
-    scope: dict,
-    coverage: dict,
-    tile_avail: dict | None,
+    scope: dict[str, Any],
+    coverage: dict[str, Any],
+    tile_avail: dict[str, Any] | None,
     tiles_csv_path: str | None,
     filter_desc: str,
     timestamp: str,
@@ -433,8 +439,9 @@ def render_report(
 
 
 def _filter_description(
-    input_csv, project_ids, short_names, framework_keys,
-    poly_uuids=None, cohorts=None, where_sql=None,
+    input_csv: str | None, project_ids: list[str], short_names: list[str],
+    framework_keys: list[str], poly_uuids: list[str] | None = None,
+    cohorts: list[str] | None = None, where_sql: str | None = None,
 ) -> str:
     parts = []
     if input_csv:
@@ -482,7 +489,7 @@ def generate_report(
     skip_s3: bool = False,
     aws_profile: str | None = None,
     output_dir: str = ".",
-    progress=None,  # optional callable(str) for phase messages
+    progress: Callable[[str], None] | None = None,
 ) -> ReportResult:
     """Generate the 4-phase TTC status report and write a Markdown file to *output_dir*."""
     project_ids = project_ids or []

@@ -17,7 +17,7 @@ import urllib.request
 import zipfile
 
 
-def main():
+def main() -> None:
     data_dir = Path(__file__).parent.parent / "src" / "gri_tile_pipeline" / "zonal" / "data"
     region_conf = pd.read_csv(data_dir / "region_conf.csv")
 

@@ -36,7 +36,7 @@ from gri_tile_pipeline.storage.tile_paths import prediction_key, raw_ard_keys
 from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
 
 
-def _make_s3_store(bucket: str, region: str, profile: str | None = None):
+def _make_s3_store(bucket: str, region: str, profile: str | None = None) -> "S3Store":
     """Build an obstore S3Store with boto3 credential handling."""
     import boto3
     from obstore.auth.boto3 import Boto3CredentialProvider
@@ -47,7 +47,7 @@ def _make_s3_store(bucket: str, region: str, profile: str | None = None):
     return S3Store(bucket, region=region, credential_provider=credential_provider)
 
 
-def validate_aws(store) -> None:
+def validate_aws(store: "S3Store") -> None:
     """Verify AWS credentials work by issuing a head call."""
     import obstore as obs
 
@@ -67,7 +67,13 @@ def validate_aws(store) -> None:
 
 
 def download_ard_for_tile(
-    s3_store, output_dir: str, year: int, x_tile: int, y_tile: int, *, skip_existing: bool = False,
+    s3_store: "S3Store",
+    output_dir: str,
+    year: int,
+    x_tile: int,
+    y_tile: int,
+    *,
+    skip_existing: bool = False,
 ) -> list[str]:
     """Download 6 ARD HKL files from S3 to local directory structure.
 
