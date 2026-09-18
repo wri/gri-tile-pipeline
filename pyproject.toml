@@ -81,7 +81,7 @@ members = ["packages/gri-tile-loaders"]
 
 [tool.uv.sources]
 gri-tile-loaders = { workspace = true }
-gri-shared-library = { git = "https://github.com/wri/gri-shared-library.git", branch = "change_constants"}
+gri-shared-library = { git = "https://github.com/wri/gri-shared-library.git", branch = "develop"}
 #gri-shared-library = { path = "/home/kennc/github/gri-shared-library"}
 
 [tool.ruff.lint.per-file-ignores]
