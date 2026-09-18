@@ -21,12 +21,18 @@ import tempfile
 import time
 import traceback
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import numpy as np
 from loguru import logger
 
 from gri_tile_pipeline.phase_timer import PhaseTimer, timed
+
+if TYPE_CHECKING:
+    # Only needed for type annotations below; the real `obstore` import stays
+    # deferred into function bodies (see module docstring — this is a Lambda
+    # worker, so module-level imports are kept minimal for cold-start time).
+    from obstore.store import ObjectStore
 
 
 class NoS2DataError(ValueError):
@@ -48,7 +54,7 @@ _MODEL_SHA256_CACHE: Dict[str, str] = {}
 # Files the Dockerfile bakes the pipeline git sha into. Checked in order;
 # first non-empty read wins. Kept in sync with `COPY docker/.git_sha ...`
 # in docker/PredictDockerfile.
-_GIT_SHA_FILES = ("/function/.git_sha", "/var/task/.git_sha")
+_GIT_SHA_FILES: tuple[str, ...] = ("/function/.git_sha", "/var/task/.git_sha")
 
 
 def _resolve_container_git_sha() -> Optional[str]:
@@ -131,7 +137,7 @@ def _build_provenance(
     }
 
 
-def _load_hkl(store, key: str):
+def _load_hkl(store: "ObjectStore", key: str) -> np.ndarray:
     """Download an HKL file from obstore and load it."""
     import hickle as hkl
     import obstore as obs
@@ -147,7 +153,7 @@ def _load_hkl(store, key: str):
         os.remove(tmp.name)
 
 
-def _load_hkl_local(path: str):
+def _load_hkl_local(path: str) -> np.ndarray:
     """Load an HKL file from local filesystem."""
     import hickle as hkl
     return hkl.load(path)
@@ -186,7 +192,7 @@ def _cog_write(dst_path: str, arr: np.ndarray, lon: float, lat: float) -> None:
         dst.write(arr, 1)
 
 
-def _write_geotiff(store, key: str, arr: np.ndarray, lon: float, lat: float):
+def _write_geotiff(store: "ObjectStore", key: str, arr: np.ndarray, lon: float, lat: float) -> None:
     """Write the prediction COG to *store* at *key*."""
     import obstore as obs
 
@@ -200,7 +206,7 @@ def _write_geotiff(store, key: str, arr: np.ndarray, lon: float, lat: float):
         os.remove(tmp.name)
 
 
-def _write_geotiff_local(path: str, arr: np.ndarray, lon: float, lat: float):
+def _write_geotiff_local(path: str, arr: np.ndarray, lon: float, lat: float) -> None:
     """Write the prediction COG directly to a local *path*."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     _cog_write(path, arr, lon, lat)
@@ -233,7 +239,7 @@ def _build_stac_item(
     )
 
 
-def _write_stac_sidecar(store, key: str, item: Dict[str, Any]) -> None:
+def _write_stac_sidecar(store: "ObjectStore", key: str, item: Dict[str, Any]) -> None:
     """Upload the STAC Item JSON next to the COG."""
     import obstore as obs
 
@@ -277,8 +283,8 @@ def predict_tile_from_arrays(
     clm: Optional[np.ndarray] = None,
     length: int = 4,
     enable_cloud_removal: bool = True,
-    diagnostics: Optional[Dict] = None,
-    intermediates: Optional[Dict] = None,
+    diagnostics: Optional[Dict[str, Any]] = None,
+    intermediates: Optional[Dict[str, Any]] = None,
     seed: Optional[int] = None,
     timer: Optional["PhaseTimer"] = None,
 ) -> np.ndarray:
@@ -291,10 +297,28 @@ def predict_tile_from_arrays(
         s2_20: (T, H2, W2, 6) uint16 or float32 — 20m S2 bands
         s1: (T_s1, H_s1, W_s1, 2) uint16 or float32 — S1 VV, VH
         dem: (H, W) float32 — DEM elevation
-        clouds: (T, H, W) bool or similar — cloud mask
+        clouds: (T, H, W) bool or similar — cloud mask.
+            NOTE (found during type-hint review, not yet resolved): this
+            parameter is currently unused below — cloud detection instead
+            runs from scratch via ``identify_clouds_shadows(s2_full, dem)``,
+            and the only external cloud-probability input actually wired in
+            is ``clm``. Both callers (``run`` and ``run_local``) still load
+            and pass a real array here, so either this should be feeding
+            into the cloud-removal step the way ``clm`` does (check the
+            reference ``download_and_predict_job.py`` for how the
+            precomputed clouds.hkl array is meant to be used), or the
+            ARD load of clouds.hkl is now pure overhead and this parameter
+            should be removed. Left as-is pending a decision.
         s2_dates: array of dates
         model_path: path to directory containing predict_graph-172.pb
-        length: temporal sequence length (4 = quarterly, default)
+        length: temporal sequence length (4 = quarterly, default).
+            NOTE (found during type-hint review, not yet resolved): only
+            the default of 4 is actually supported end-to-end today — the
+            quarterly-reduction reshapes below (``s2_12.reshape(4, 3, ...)``
+            etc.) hardcode 4 quarters of 3 months regardless of this value,
+            so passing anything else would raise a shape-mismatch error at
+            ``feature_stack[:length, ...] = s2_q``. Currently dormant since
+            neither caller passes a non-default ``length``.
         enable_cloud_removal: run multi-temporal cloud removal (default True)
         diagnostics: if provided, intermediate outputs are stored into this dict
 
@@ -352,7 +376,7 @@ def predict_tile_from_arrays(
                 s1[i, :, :, b][sat_mask] = med
 
     # Convert S1 linear backscatter to dB (reference lines 790-791)
-    def _convert_to_db(x, min_db=22):
+    def _convert_to_db(x: np.ndarray, min_db: float = 22) -> np.ndarray:
         x = 10 * np.log10(x + 1 / 65535)
         x[x < -min_db] = -min_db
         x = (x + min_db) / min_db
@@ -774,6 +798,8 @@ def predict_tile_from_arrays(
     # ------------------------------------------------------------------
     # 8. Quarterly reduction: 12 monthly → 4 quarterly via median
     #    (reference lines 1394-1398: reshape (12,...) → (4,3,...), median axis=1)
+    #    NOTE: hardcodes 4x3 regardless of `length` — see the `length` note
+    #    in the docstring above. Currently fine since length is always 4.
     # ------------------------------------------------------------------
     s2_q = np.median(s2_12.reshape(4, 3, H, W, 10), axis=1)        # (4, H, W, 10)
     indices_q = np.median(indices_12.reshape(4, 3, H, W, 4), axis=1)  # (4, H, W, 4)
@@ -864,13 +890,19 @@ def run(
     seed: Optional[int] = None,
     prediction_key_override: Optional[str] = None,
     ard_keys_override: Optional[Dict[str, str]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Lithops entry-point for single-tile prediction.
 
     ``prediction_key_override`` / ``ard_keys_override`` are used by parity
     tooling to (a) avoid clobbering the production FINAL.tif and (b) read ARD
     from non-canonical paths. Production callers leave both as None.
+
+    NOTE (found during type-hint review, not yet resolved): ``debug`` is
+    accepted but never read anywhere below — no logging or verbosity change
+    is currently tied to it. Left as-is pending a decision on whether it
+    should gate something (e.g. passing `diagnostics=`/`intermediates=`
+    dicts into ``predict_tile_from_arrays``) or be removed.
 
     Returns a structured dict with ``status``, ``error_message``, etc.
     """
@@ -1078,12 +1110,15 @@ def run_local(
     import glob
 
     # Find HKL files
-    s2_10 = hkl.load(glob.glob(f"{ard_dir}/s2_10/*.hkl")[0])
-    s2_20 = hkl.load(glob.glob(f"{ard_dir}/s2_20/*.hkl")[0])
-    s1 = hkl.load(glob.glob(f"{ard_dir}/s1/*.hkl")[0])
-    dem = hkl.load(glob.glob(f"{ard_dir}/misc/dem_*.hkl")[0])
-    clouds = hkl.load(glob.glob(f"{ard_dir}/clouds/clouds_*.hkl")[0])
-    s2_dates = hkl.load(glob.glob(f"{ard_dir}/misc/s2_dates_*.hkl")[0])
+    # (annotated explicitly since hkl.load's return type is untyped —
+    # hickle ships no py.typed marker/stubs — so without these the calls
+    # into predict_tile_from_arrays below would go unchecked)
+    s2_10: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/s2_10/*.hkl")[0])
+    s2_20: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/s2_20/*.hkl")[0])
+    s1: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/s1/*.hkl")[0])
+    dem: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/misc/dem_*.hkl")[0])
+    clouds: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/clouds/clouds_*.hkl")[0])
+    s2_dates: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/misc/s2_dates_*.hkl")[0])
 
     logger.info(f"Loaded ARD: s2_10={s2_10.shape}, s2_20={s2_20.shape}, "
                 f"s1={s1.shape}, dem={dem.shape}")
@@ -1117,3 +1152,4 @@ def run_local(
         logger.info(f"Wrote {sidecar_path}")
 
     return predictions
+

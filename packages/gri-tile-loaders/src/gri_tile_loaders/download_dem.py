@@ -9,11 +9,11 @@ from __future__ import annotations
 import os
 import sys
 import argparse
+from typing import Any
 import numpy as np
 from loguru import logger
 from math import sqrt
 from pyproj import Transformer
-from typing import Tuple
 
 from obstore.store import from_url, LocalStore
 import boto3
@@ -40,15 +40,15 @@ def get_aws_principal() -> str:
     return boto3.client("sts").get_caller_identity()["Arn"]
 
 
-def ensure_local_dirs_for_key(store, relpath: str) -> None:
+def ensure_local_dirs_for_key(store: LocalStore, relpath: str) -> None:
     # Only create local directories for LocalStore to avoid remote '.keep' artifacts
     if isinstance(store, LocalStore):
         dirname = os.path.dirname(relpath)
         if dirname:
-            os.makedirs(os.path.join(store.prefix, dirname), exist_ok=True)
+            os.makedirs(os.path.join(str(store.prefix), dirname), exist_ok=True)
 
 
-def bbox2geojson(bbox: list) -> dict:
+def bbox2geojson(bbox: list[float]) -> dict[str, Any]:
     coords = [
         [bbox[0], bbox[1]],
         [bbox[2], bbox[1]],
@@ -58,13 +58,13 @@ def bbox2geojson(bbox: list) -> dict:
     ]
     return {"type": "Polygon", "coordinates": [coords]}
 
-def bbox_4326_to_3857(bbox: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
+def bbox_4326_to_3857(bbox: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     tf = Transformer.from_crs(4326, 3857, always_xy=True)
     x0, y0 = tf.transform(bbox[0], bbox[1])
     x1, y1 = tf.transform(bbox[2], bbox[3])
     return (x0, y0, x1, y1)
 
-def slopePython(inBlock, outBlock, inXSize, inYSize, zScale=1):
+def slopePython(inBlock: np.ndarray, outBlock: np.ndarray, inXSize: np.ndarray, inYSize: np.ndarray, zScale: float = 1) -> np.ndarray:
     """ Calculate slope using Python.
         If Numba is available will make use of autojit function
         to run at ~ 1/2 the speed of the Fortran module.
@@ -93,14 +93,14 @@ def slopePython(inBlock, outBlock, inXSize, inYSize, zScale=1):
     return outBlock
 
 
-def slopePythonPlane(inBlock,
-                     outBlock,
-                     inXSize,
-                     inYSize,
-                     A_mat,
-                     z_vec,
-                     winSize=3,
-                     zScale=1):
+def slopePythonPlane(inBlock: np.ndarray,
+                     outBlock: np.ndarray,
+                     inXSize: np.ndarray,
+                     inYSize: np.ndarray,
+                     A_mat: np.ndarray,
+                     z_vec: np.ndarray,
+                     winSize: int = 3,
+                     zScale: float = 1) -> np.ndarray:
     """ Calculate slope using Python.
         Algorithm fits plane to a window of data and calculated the slope
         from this - slope than the standard algorithm but can deal with
@@ -160,13 +160,13 @@ def slopePythonPlane(inBlock,
     return outBlock
 
 
-def calcSlope(inBlock,
-              inXSize,
-              inYSize,
-              fitPlane=False,
-              zScale=1,
-              winSize=3,
-              minSlope=None):
+def calcSlope(inBlock: np.ndarray,
+              inXSize: np.ndarray,
+              inYSize: np.ndarray,
+              fitPlane: bool = False,
+              zScale: int = 1,
+              winSize: int = 3,
+              minSlope: float | None = None) -> np.ndarray:
     """ Calculates slope for a block of data
         Arrays are provided giving the size for each pixel.
         * inBlock - In elevation
@@ -198,7 +198,7 @@ def calcSlope(inBlock,
             outBlock[0])
     return outBlock
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(
         description="Copernicus DEM GLO-30 loader, legacy-compatible output."
     )
@@ -334,7 +334,7 @@ def run(
     dest: str,
     expansion: int = 300,
     debug: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Programmatic entry-point for Lithops and local execution."""
     _run_core(
         year=int(year), lon=float(lon), lat=float(lat),

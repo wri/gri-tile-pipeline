@@ -10,8 +10,8 @@ from pathlib import Path
 
 # Historical chunk-size ladder: first four chunks are small so early Lambda
 # fan-outs surface failures fast, then 1600 each to keep per-chunk cost bounded.
-DEFAULT_CHUNK_LADDER = [100, 200, 400, 800]
-STEADY_CHUNK_SIZE = 1600
+DEFAULT_CHUNK_LADDER: list[int] = [100, 200, 400, 800]
+STEADY_CHUNK_SIZE: int = 1600
 
 
 def _next_size(chunk_index: int, ladder: list[int], steady: int) -> int:

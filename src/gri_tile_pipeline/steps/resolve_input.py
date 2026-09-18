@@ -13,31 +13,36 @@ from __future__ import annotations
 import csv as csv_mod
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 from gri_shared_library.os_tools import get_project_root_dir
 
 from loguru import logger
 
-PROJECT_ROOT_DIR = get_project_root_dir()
+if TYPE_CHECKING:
+    import geopandas as gpd
+
+    from gri_tile_pipeline.config import PipelineConfig
+
+PROJECT_ROOT_DIR: str = get_project_root_dir()
 
 
 @dataclass
 class ResolvedInput:
     """Result of resolving an input file to tiles."""
 
-    tiles: List[Dict[str, Any]]
+    tiles: list[dict[str, Any]]
     input_type: str  # tiles_csv, request_csv, polygon_file, json_request
-    polygons_gdf: Any = None  # Optional GeoDataFrame
-    polygons_path: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    polygons_gdf: "gpd.GeoDataFrame | None" = None
+    polygons_path: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
-TILES_CSV_COLUMNS = {"Year", "X", "Y", "X_tile", "Y_tile"}
-REQUEST_CSV_COLUMNS = {"project_id", "plantstart_year"}
+TILES_CSV_COLUMNS: set[str] = {"Year", "X", "Y", "X_tile", "Y_tile"}
+REQUEST_CSV_COLUMNS: set[str] = {"project_id", "plantstart_year"}
 
 # Anything with a recognizable file extension or a path separator must refer
 # to a real file. Bare tokens like "GHA_22_INEC" are treated as short names.
-_FILE_EXTENSIONS = {
+_FILE_EXTENSIONS: set[str] = {
     ".csv", ".json", ".geojson", ".gpkg", ".shp", ".parquet", ".geoparquet",
 }
 
@@ -85,7 +90,7 @@ def detect_input_type(path: str) -> str:
 
 def resolve_to_tiles(
     input_path: str | None,
-    cfg,
+    cfg: "PipelineConfig",
     *,
     year: int | None = None,
     year_from_plantstart: bool = False,
@@ -168,7 +173,7 @@ def resolve_to_tiles(
 
 def _resolve_by_filter(
     geoparquet: str,
-    cfg,
+    cfg: "PipelineConfig",
     *,
     year: int | None,
     where_sql: str | None,
@@ -221,7 +226,7 @@ def _resolve_tiles_csv(path: str) -> ResolvedInput:
     return ResolvedInput(tiles=tiles, input_type="tiles_csv")
 
 
-def _resolve_json_request(path: str, cfg) -> ResolvedInput:
+def _resolve_json_request(path: str, cfg: PipelineConfig) -> ResolvedInput:
     import tempfile
 
     from gri_tile_pipeline.steps.ingest import run_ingest
@@ -239,7 +244,7 @@ def _resolve_json_request(path: str, cfg) -> ResolvedInput:
         os.unlink(tmp.name)
 
 
-def _resolve_request_csv(path: str, geoparquet: str, cfg) -> ResolvedInput:
+def _resolve_request_csv(path: str, geoparquet: str, cfg: PipelineConfig) -> ResolvedInput:
     from gri_tile_pipeline.steps.project_e2e import _extract_from_request_csv
     from gri_tile_pipeline.tiles.tile_lookup import identify_tiles_for_polygons
 
@@ -260,7 +265,7 @@ def _resolve_request_csv(path: str, geoparquet: str, cfg) -> ResolvedInput:
 
 
 def _resolve_short_name(
-    short_name: str, geoparquet: str, cfg, *, year: int | None
+    short_name: str, geoparquet: str, cfg: PipelineConfig, *, year: int | None
 ) -> ResolvedInput:
     from gri_tile_pipeline.steps.project_e2e import _extract_project
     from gri_tile_pipeline.tiles.tile_lookup import identify_tiles_for_polygons
@@ -282,7 +287,7 @@ def _resolve_short_name(
 
 
 def _resolve_polygon_file(
-    path: str, cfg, *, year: int | None, year_from_plantstart: bool
+    path: str, cfg: PipelineConfig, *, year: int | None, year_from_plantstart: bool
 ) -> ResolvedInput:
     import geopandas as gpd
     import pandas as pd

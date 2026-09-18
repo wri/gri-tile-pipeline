@@ -19,7 +19,7 @@ import rasterio
 import hickle as hkl
 
 
-def format_shape(arr_shape):
+def format_shape(arr_shape: tuple[int, ...]) -> str:
     """Return a human-friendly shape string."""
     try:
         return "x".join(str(int(d)) for d in arr_shape)
@@ -27,7 +27,7 @@ def format_shape(arr_shape):
         return str(arr_shape)
 
 
-def describe_tif(path, verbose=False):
+def describe_tif(path: str | os.PathLike[str], verbose: bool = False) -> None:
     with rasterio.open(path) as ds:
         width, height = ds.width, ds.height
         count = ds.count
@@ -51,7 +51,7 @@ def describe_tif(path, verbose=False):
                     )
 
 
-def describe_npy(path, verbose=False):
+def describe_npy(path: str | os.PathLike[str], verbose: bool = False) -> None:
     arr = np.load(path)
     print(f"  Type: NPY | Shape: {format_shape(arr.shape)} | DType: {arr.dtype}")
     if verbose:
@@ -66,7 +66,7 @@ def describe_npy(path, verbose=False):
             )
 
 
-def describe_hkl(path, verbose=False):
+def describe_hkl(path: str | os.PathLike[str], verbose: bool = False) -> None:
     obj = hkl.load(path)
     # Handle common container shapes
     if isinstance(obj, np.ndarray):
@@ -100,7 +100,7 @@ def describe_hkl(path, verbose=False):
         print(f"  Type: HKL({t})")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Describe locally mirrored assets for a tile"
     )

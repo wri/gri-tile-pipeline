@@ -25,7 +25,7 @@ from gri_tile_pipeline.config import load_config
 from gri_tile_pipeline.steps.project_e2e import run_project_pipeline
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="End-to-end TTC pipeline for a TerraMatch project",
     )

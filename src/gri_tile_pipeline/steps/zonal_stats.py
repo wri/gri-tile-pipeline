@@ -17,7 +17,7 @@ from loguru import logger
 from gri_tile_pipeline.config import PipelineConfig
 from gri_shared_library.os_tools import get_project_root_dir
 
-PROJECT_ROOT_DIR = get_project_root_dir()
+PROJECT_ROOT_DIR: str = get_project_root_dir()
 
 
 def _cleanup_batch(tile_paths: List[str], mosaic_path: str) -> None:
