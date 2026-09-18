@@ -90,4 +90,6 @@ docker/.git_sha
 # idea folder, uncomment if you don't need it
 .idea
 
-
+# testing objects
+local*
+data/

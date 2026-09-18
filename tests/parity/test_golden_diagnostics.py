@@ -88,6 +88,7 @@ def load_reference_tif(tile_name: str) -> np.ndarray:
 
 
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_golden_diagnostics(tile_name):
     """Run diagnostic analysis on a golden tile: cloud removal on vs off."""
     from gri_tile_loaders.predict_tile import predict_tile_from_arrays

@@ -6,6 +6,7 @@ import os
 from gri_tile_pipeline.storage.tile_paths import raw_ard_keys
 
 
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_ard_files_match_expected_keys(ard_dir):
     """Verify that example ARD directory has all expected files."""
     keys = raw_ard_keys(2024, 1000, 871)

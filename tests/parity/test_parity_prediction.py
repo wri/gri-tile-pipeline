@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tests.constants import ARD_DIR, MODEL_DIR, REFERENCE_TIF
+from tests.constants import ARD_RAW, MODEL_DIR, REFERENCE_TIF
 from tests.markers import has_ard, has_model, has_reference, has_tf
 from tests.parity.metrics import compare_predictions
 
@@ -43,7 +43,7 @@ def test_prediction_parity_baseline():
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     ours = run_local(
-        ard_dir=str(ARD_DIR),
+        ard_dir=str(ARD_RAW),
         model_path=str(MODEL_DIR),
         output_path=output_path,
     )

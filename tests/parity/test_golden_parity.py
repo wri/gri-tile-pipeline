@@ -133,6 +133,7 @@ def _get_stats(tile_name: str) -> dict:
 
 
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_golden_baseline(tile_name):
     """Tier 1: baseline gates that must not regress."""
     stats = _get_stats(tile_name)
@@ -159,6 +160,7 @@ def test_golden_baseline(tile_name):
 
 
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_golden_improved(tile_name):
     """Tier 2: target after cloud removal improvements."""
     stats = _get_stats(tile_name)
@@ -182,6 +184,7 @@ def test_golden_improved(tile_name):
 
 
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_golden_target(tile_name):
     """Tier 3: production quality target."""
     stats = _get_stats(tile_name)
@@ -204,7 +207,7 @@ def test_golden_target(tile_name):
 # Aggregate report (runs after all tile tests)
 # ---------------------------------------------------------------------------
 
-
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_golden_aggregate_report():
     """Print aggregate parity report across all golden tiles."""
     # Ensure all tiles have been computed

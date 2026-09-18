@@ -4,7 +4,7 @@ Usage:
     python tests/test_predict_parity.py
 
 Requires:
-    - example/raw_v2/ (ARD input data for tile 1000X871Y)
+    - example/sample_ard/raw_v2/ (ARD input data for tile 1000X871Y)
     - example/1000X871Y_FINAL.tif (reference prediction)
     - models/predict_graph-172.pb
     - tensorflow, hickle, rasterio, scikit-image, scipy, numpy
@@ -17,7 +17,7 @@ import pytest
 
 # Paths
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ARD_DIR = os.path.join(REPO_ROOT, "example", "raw_v2")
+ARD_DIR = os.path.join(REPO_ROOT, "example", "sample_ard", "raw_v2")
 REFERENCE_TIF = os.path.join(REPO_ROOT, "example", "1000X871Y_FINAL.tif")
 MODEL_DIR = os.path.join(REPO_ROOT, "models")
 OUTPUT_TIF = os.path.join(REPO_ROOT, "temp", "test_1000X871Y_FINAL.tif")

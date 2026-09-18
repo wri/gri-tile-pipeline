@@ -95,6 +95,10 @@ gri-shared-library = { git = "https://github.com/wri/gri-shared-library.git", br
 "tests/parity/test_lambda_parity.py" = ["E402"]
 
 [tool.pytest.ini_options]
+ard_file_tests = "exclude"       # exclude | include | only  (Default is exclude. GH workflow always specifies exclude.)
+                                 # Controls whether tests named test_golden_* or test_ard_* are executed.
+ard_file_max_workers = ""        # blank = derive from headroom below
+ard_file_worker_headroom = "2"   # workers = vCPU count - 2 (min 1) when ard_file_tests=only
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
