@@ -16,7 +16,7 @@ you'll need `AWS_PROFILE` and `LITHOPS_ENV` exported.
 ## Path A — one command
 
 ```bash
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes
 ```
 
 That's it: polygons for the project are pulled from `tm.geoparquet`,
@@ -29,19 +29,19 @@ pipeline runs. On success you get `results.csv` next to your shell.
 # Several short names
 gri-ttc run-project \
     --short-name GHA_22_INEC --short-name RWA_23_AEE \
-    --dest s3://tof-output --yes
+    --dest s3://wri-restoration-geodata-ttc --yes
 
 # By framework / cohort
-gri-ttc run-project --framework-key terrafund-landscapes --dest s3://tof-output --yes
-gri-ttc run-project --cohort priority --dest s3://tof-output --yes
+gri-ttc run-project --framework-key terrafund-landscapes --dest s3://wri-restoration-geodata-ttc --yes
+gri-ttc run-project --cohort priority --dest s3://wri-restoration-geodata-ttc --yes
 
 # Specific polygons
 gri-ttc run-project --poly-uuid <uuid1> --poly-uuid <uuid2> \
-    --year 2023 --dest s3://tof-output --yes
+    --year 2023 --dest s3://wri-restoration-geodata-ttc --yes
 
 # Arbitrary SQL on the geoparquet (alias: p)
 gri-ttc run-project --where "country='GHA' AND YEAR(plantstart)=2023" \
-    --dest s3://tof-output --yes
+    --dest s3://wri-restoration-geodata-ttc --yes
 ```
 
 `--where` is read-only; DDL/DML and `;` are rejected. All of these
@@ -74,7 +74,7 @@ gri-ttc resolve polygons.geojson --year 2023 -o tiles.csv
 
 # 2. Compute zonal stats for polygons against existing predictions
 gri-ttc stats polygons.geojson \
-    --dest s3://tof-output \
+    --dest s3://wri-restoration-geodata-ttc \
     --year 2023 \
     -o results.csv
 ```

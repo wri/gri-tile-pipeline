@@ -177,9 +177,9 @@ def test_stac_item_allows_nullable_provenance():
 def test_cog_writer_produces_tiled_overviewed_geotiff():
     import rasterio
 
-    # The writer is defined in loaders/predict_tile.py. Import lazily so we
+    # The writer is defined in gri_tile_loaders/predict_tile.py. Import lazily so we
     # don't force TF into the test process.
-    from loaders.predict_tile import _cog_write
+    from gri_tile_loaders.predict_tile import _cog_write
 
     h = w = 640  # large enough that blocksize=256 yields >=1 overview level
     arr = np.random.default_rng(0).integers(0, 101, size=(h, w), dtype=np.uint8)

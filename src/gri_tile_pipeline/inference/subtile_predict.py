@@ -11,18 +11,26 @@ Reference size conventions:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 from loguru import logger
 
 from gri_tile_pipeline.inference.normalize import normalize_subtile
 
+if TYPE_CHECKING:
+    # Adjust this import path if PredictSession actually lives elsewhere —
+    # it's a TYPE_CHECKING-only import so a wrong path can't break runtime,
+    # only static analysis.
+    from gri_tile_pipeline.inference.frozen_graph import PredictSession
+
 
 # Output crop size (matches reference global SIZE = 172-14)
-SIZE = 158
+SIZE: int = 158
 # Border pixels on each side for overlap
-BORDER = 7
+BORDER: int = 7
 # Full model input size
-INPUT_SIZE = SIZE + 2 * BORDER  # 172
+INPUT_SIZE: int = SIZE + 2 * BORDER  # 172
 
 
 def fspecial_gauss(size: int, sigma: float) -> np.ndarray:
@@ -34,7 +42,7 @@ def fspecial_gauss(size: int, sigma: float) -> np.ndarray:
 
 def predict_subtile(
     subtile: np.ndarray,
-    predict_session,
+    predict_session: "PredictSession",
     output_size: int = SIZE,
     length: int = 4,
 ) -> np.ndarray:
@@ -137,7 +145,12 @@ def _bright_surface_attenuation(subtile_raw: np.ndarray) -> np.ndarray:
     """
     from scipy.ndimage import binary_dilation, distance_transform_edt as distance
 
-    # EVI from channels 0 (Blue), 2 (Red), 3 (NIR)
+    # EVI from channels 0 (Blue), 2 (Red), 3 (NIR); SWIR1.6 from channel 8.
+    # NOTE: these channel indices assume the same feature-stack band order
+    # used elsewhere in the pipeline (e.g. wherever `feature_stack` is
+    # built before being passed into mosaic_predictions) — confirm they
+    # still match if that ordering ever changes, since a mismatch here
+    # would silently detect the wrong pixels as "bright" with no error.
     blue = np.clip(subtile_raw[..., 0], 0, 1)
     red = np.clip(subtile_raw[..., 2], 0, 1)
     nir = np.clip(subtile_raw[..., 3], 0, 1)
@@ -151,12 +164,22 @@ def _bright_surface_attenuation(subtile_raw: np.ndarray) -> np.ndarray:
     flag = flag * (evi < 0.3)
 
     bright = np.sum(flag, axis=0) > 1
-    bright = binary_dilation(1 - bright, iterations=2)
-    bright = binary_dilation(1 - bright, iterations=1)
+    # `1 - bright` promotes the bool array to a signed-int array (numpy's
+    # typing rules, not just a runtime quirk mypy is imagining), and
+    # binary_dilation's stub carries that dtype through — so reassigning
+    # straight back into `bright` trips a bool/int mismatch even though
+    # the values are still plain 0/1 masks. Cast back to bool explicitly;
+    # it's a no-op on the actual data.
+    bright = binary_dilation(1 - bright, iterations=2).astype(bool)
+    bright = binary_dilation(1 - bright, iterations=1).astype(bool)
 
     blurred = distance(1 - bright).astype(np.float32)
     blurred[blurred > 3] = 3
-    blurred = blurred / 3
+    # Dividing a float32 array by a plain Python int is typed as
+    # promoting to float64, even though numpy's actual runtime behavior
+    # keeps float32 here — pin the dtype explicitly rather than let the
+    # variable's declared type drift.
+    blurred = (blurred / 3).astype(np.float32)
 
     # Crop BORDER on each side to match prediction output size
     return blurred[BORDER:-BORDER, BORDER:-BORDER]
@@ -164,10 +187,10 @@ def _bright_surface_attenuation(subtile_raw: np.ndarray) -> np.ndarray:
 
 def mosaic_predictions(
     feature_stack: np.ndarray,
-    predict_session,
+    predict_session: "PredictSession",
     tile_size: int = SIZE,
     length: int = 4,
-    gauss_sigma: int = 36,
+    gauss_sigma: float = 36.0,
     interp: np.ndarray | None = None,
 ) -> np.ndarray:
     """Run prediction on overlapping subtiles and mosaic with Gaussian blending.
@@ -240,8 +263,8 @@ def mosaic_predictions(
                 mc_crop = min_clear[6:-6, 6:-6]
                 no_images = mc_crop < 1
                 struct2 = generate_binary_structure(2, 2)
-                no_images = 1 - binary_dilation(1 - no_images, structure=struct2, iterations=6)
-                no_images = binary_dilation(no_images, structure=struct2, iterations=6)
+                no_images = (1 - binary_dilation(1 - no_images, structure=struct2, iterations=6)).astype(bool)
+                no_images = binary_dilation(no_images, structure=struct2, iterations=6).astype(bool)
                 # Block-based thresholding for SIZE=158: reshape to (4, 40, 4, 40)
                 ch, cw = no_images.shape
                 if ch == 160 and cw == 160:

@@ -1,7 +1,6 @@
 """Tests for spatial clustering of polygons by shared tiles."""
 
 import pandas as pd
-import pytest
 from shapely.geometry import box
 
 from gri_tile_pipeline.zonal.spatial_clustering import UnionFind, cluster_polygons_by_tiles

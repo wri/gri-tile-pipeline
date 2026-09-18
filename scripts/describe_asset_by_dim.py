@@ -15,7 +15,7 @@ import rasterio
 import hickle as hkl
 
 
-def summarize_array(arr: np.ndarray, axis: int):
+def summarize_array(arr: np.ndarray, axis: int) -> None:
     print(f"Array shape: {arr.shape}, dtype: {arr.dtype}")
     if axis < 0 or axis >= arr.ndim:
         print(f"Requested axis {axis} out of bounds for array with {arr.ndim} dims")
@@ -37,7 +37,7 @@ def summarize_array(arr: np.ndarray, axis: int):
             )
 
 
-def describe_tif(path: str):
+def describe_tif(path: str) -> None:
     with rasterio.open(path) as ds:
         width, height = ds.width, ds.height
         count = ds.count
@@ -59,13 +59,13 @@ def describe_tif(path: str):
                 )
 
 
-def describe_npy(path: str, dim: int):
+def describe_npy(path: str, dim: int) -> None:
     arr = np.load(path)
     print(f"NPY {path}")
     summarize_array(arr, dim)
 
 
-def describe_hkl(path: str, dim: int, key: str | None):
+def describe_hkl(path: str, dim: int, key: str | None) -> None:
     obj = hkl.load(path)
     if isinstance(obj, np.ndarray):
         print(f"HKL(np.ndarray) {path}")
@@ -92,7 +92,7 @@ def describe_hkl(path: str, dim: int, key: str | None):
         )
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Describe a local asset by dimension/band"
     )

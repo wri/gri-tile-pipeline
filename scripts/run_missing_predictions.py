@@ -36,7 +36,7 @@ from gri_tile_pipeline.storage.tile_paths import prediction_key, raw_ard_keys
 from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
 
 
-def _make_s3_store(bucket: str, region: str, profile: str | None = None):
+def _make_s3_store(bucket: str, region: str, profile: str | None = None) -> "S3Store":
     """Build an obstore S3Store with boto3 credential handling."""
     import boto3
     from obstore.auth.boto3 import Boto3CredentialProvider
@@ -47,7 +47,7 @@ def _make_s3_store(bucket: str, region: str, profile: str | None = None):
     return S3Store(bucket, region=region, credential_provider=credential_provider)
 
 
-def validate_aws(store) -> None:
+def validate_aws(store: "S3Store") -> None:
     """Verify AWS credentials work by issuing a head call."""
     import obstore as obs
 
@@ -67,7 +67,13 @@ def validate_aws(store) -> None:
 
 
 def download_ard_for_tile(
-    s3_store, output_dir: str, year: int, x_tile: int, y_tile: int, *, skip_existing: bool = False,
+    s3_store: "S3Store",
+    output_dir: str,
+    year: int,
+    x_tile: int,
+    y_tile: int,
+    *,
+    skip_existing: bool = False,
 ) -> list[str]:
     """Download 6 ARD HKL files from S3 to local directory structure.
 
@@ -110,7 +116,7 @@ def main():
     )
     parser.add_argument("csv", help="Path to tiles CSV (Year,X,Y,Y_tile,X_tile)")
     parser.add_argument(
-        "--bucket", default="tof-output", help="S3 bucket containing ARD (default: tof-output)"
+        "--bucket", default="wri-restoration-geodata-ttc", help="S3 bucket containing ARD (default: wri-restoration-geodata-ttc)"
     )
     parser.add_argument(
         "--region", default="us-east-1", help="S3 bucket region (default: us-east-1)"
@@ -156,7 +162,7 @@ def main():
             pred_key = prediction_key(t["year"], t["X_tile"], t["Y_tile"])
             local_tif = os.path.join(args.output_dir, pred_key)
             print(f"[{i}/{len(tiles)}] {tag} year={t['year']}")
-            print(f"  ARD keys to download:")
+            print("  ARD keys to download:")
             for key in raw_ard_keys(t["year"], t["X_tile"], t["Y_tile"]):
                 print(f"    s3://{args.bucket}/{key}")
             print(f"  Output: {local_tif}")
@@ -180,7 +186,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Lazy import — predict_tile pulls in TensorFlow which is slow
-    from loaders.predict_tile import run as predict_run
+    from gri_tile_loaders.predict_tile import run as predict_run
 
     successes: list[dict] = []
     failures: list[dict] = []
@@ -260,7 +266,6 @@ def main():
 
         # Also print a single combined command if multiple tiles
         if len(successes) > 1:
-            tiles_dir = os.path.join(args.output_dir)
             print("Or sync the entire output directory:")
             # Find common year prefix
             years = sorted(set(s["year"] for s in successes))

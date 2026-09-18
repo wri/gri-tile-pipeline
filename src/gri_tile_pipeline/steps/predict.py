@@ -7,10 +7,15 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import yaml
 from loguru import logger
+
+from gri_tile_pipeline.config import PipelineConfig
+from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
+from gri_tile_pipeline.tracking import JobTracker
+from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
 
 
 def _require_predict_config(path: str) -> None:
@@ -36,14 +41,8 @@ def _require_predict_config(path: str) -> None:
             "generate the rendered Lithops config."
         )
 
-from gri_tile_pipeline.config import PipelineConfig
-from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
-from gri_tile_pipeline.tracking import JobTracker
-from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
-
-
 # Historical average prediction duration (seconds)
-AVG_PREDICT_DURATION = 180
+AVG_PREDICT_DURATION: int = 180
 
 
 # ------------------------------------
@@ -105,7 +104,7 @@ def run_predict(
         lithops_cfg = yaml.safe_load(f)
     lithops_cfg.setdefault("aws_lambda", {})["runtime"] = runtime
 
-    base_kwargs: List[Dict[str, Any]] = [
+    base_kwargs: list[dict[str, Any]] = [
         {
             "year": t["year"],
             "lon": t["lon"],
@@ -123,12 +122,12 @@ def run_predict(
     fexec = FunctionExecutor(config=lithops_cfg, runtime=runtime, runtime_memory=memory_mb)
     retry_exec = lithops.RetryingFunctionExecutor(fexec)
 
-    futures: List[Tuple[RetryingFuture, str, str, Dict[str, Any]]] = []
+    futures: list[tuple[RetryingFuture, str, str, dict[str, Any]]] = []
     for kw in base_kwargs:
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures.append((
             RetryingFuture(
-                fexec.call_async(_run_predict, (kw,), include_modules=["loaders", "lithops_workers"]),
+                fexec.call_async(_run_predict, (kw,), include_modules=["gri_tile_loaders", "lithops_workers"]),
                 _run_predict, (kw,), retries=retries,
             ),
             "PREDICT", "us-west-2", tile_info,
@@ -162,7 +161,7 @@ def run_predict_local(
 
     Returns the :class:`JobTracker` with all results.
     """
-    from loaders.predict_tile import run as predict_run
+    from gri_tile_loaders.predict_tile import run as predict_run
 
     from gri_tile_pipeline.execution import run_local_tasks
 

@@ -10,18 +10,20 @@ Matches each row's ``poly_uuid`` against the ids returned by
 from __future__ import annotations
 
 import math
+import pandas as pd
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Literal, Optional
+from typing import Any, Iterable, Literal
 
+from gri_shared_library.constants import FORCE_NULL_PATCH_KEYWORD
 from loguru import logger
 
 from gri_tile_pipeline.terramatch.client import TMApiError, TMClient
 
-DEFAULT_SLUG = "treeCover"
-DEFAULT_PROJECT_PHASE = "implementation"
-DEFAULT_PERCENT_COLUMN = "ttc"
-DEFAULT_YEAR_COLUMN = "year"
+DEFAULT_SLUG: str = "treeCover"
+DEFAULT_PROJECT_PHASE: str = "implementation"
+DEFAULT_PERCENT_COLUMN: str = "ttc"
+DEFAULT_YEAR_COLUMN: str = "year"
 
 # Ordered candidates — first match wins. Columns produced by the zonal error-
 # propagation step when `--shift-error` is on live here; `_error` / `_stderr` /
@@ -38,12 +40,12 @@ UNCERTAINTY_COLUMN_CANDIDATES: tuple[str, ...] = (
 
 @dataclass
 class IndicatorSpec:
-    year: Optional[int] = None  # required if no year_column value is set on the row
+    year: int | None = None  # required if no year_column value is set on the row
     slug: str = DEFAULT_SLUG
     project_phase: str = DEFAULT_PROJECT_PHASE
-    year_column: Optional[str] = DEFAULT_YEAR_COLUMN
+    year_column: str | None = DEFAULT_YEAR_COLUMN
     percent_column: str = DEFAULT_PERCENT_COLUMN
-    uncertainty_column: Optional[str] = None
+    uncertainty_column: str | None = None
 
 
 PatchStatus = Literal["sent", "dryrun", "unmatched", "error"]
@@ -52,11 +54,11 @@ PatchStatus = Literal["sent", "dryrun", "unmatched", "error"]
 @dataclass
 class PatchOutcome:
     poly_uuid: str
-    polygon_id: Optional[str]
+    polygon_id: str | None
     status: PatchStatus
-    http_status: Optional[int] = None
-    message: Optional[str] = None
-    payload: Optional[dict] = field(default=None, repr=False)
+    http_status: int | None = None
+    message: str | None = None
+    payload: dict[str, Any] | None = field(default=None, repr=False)
 
     def as_dict(self) -> dict:
         out = {
@@ -71,15 +73,13 @@ class PatchOutcome:
         return out
 
 
-def load_results(csv_path: str | Path) -> tuple[list[dict], list[str]]:
+def load_results(csv_path: str | Path) -> tuple[list[dict[str, Any]], list[str]]:
     """Return (rows, column_names) from *csv_path*."""
-    import pandas as pd
-
     df = pd.read_csv(csv_path)
     return df.to_dict(orient="records"), list(df.columns)
 
 
-def detect_uncertainty_column(columns: Iterable[str]) -> Optional[str]:
+def detect_uncertainty_column(columns: Iterable[str]) -> str | None:
     """Find the shift-error column emitted by ``stats --shift-error``, if any."""
     cols = list(columns)
     lower_to_actual = {c.lower(): c for c in cols}
@@ -103,7 +103,7 @@ def build_poly_id_set(client: TMClient, project_id: str) -> set[str]:
     return ids
 
 
-def _coerce_float(value) -> Optional[float]:
+def _coerce_float(value: Any) -> float | None:
     if value is None:
         return None
     if isinstance(value, float) and math.isnan(value):
@@ -117,12 +117,12 @@ def _coerce_float(value) -> Optional[float]:
     return f
 
 
-def build_indicator(row: dict, spec: IndicatorSpec) -> dict:
+def build_indicator(row: dict[str, Any], spec: IndicatorSpec) -> dict[str, Any]:
     """Assemble one indicator dict for the PATCH payload.
 
     Raises :class:`ValueError` if the percent-cover column is missing or non-numeric.
     """
-    year: Optional[int] = spec.year
+    year: int | None = spec.year
     if spec.year_column and spec.year_column in row:
         raw = row[spec.year_column]
         if raw not in (None, ""):
@@ -136,11 +136,15 @@ def build_indicator(row: dict, spec: IndicatorSpec) -> dict:
             f"no year available (pass --year or include {spec.year_column!r} column)"
         )
 
-    percent = _coerce_float(row.get(spec.percent_column))
-    if percent is None:
-        raise ValueError(
-            f"row missing numeric {spec.percent_column!r} column"
-        )
+    if (isinstance(row.get(spec.percent_column), str) and
+            row.get(spec.percent_column).upper() == FORCE_NULL_PATCH_KEYWORD.upper()):
+        percent = None
+    else:
+        percent = _coerce_float(row.get(spec.percent_column))
+        if percent is None:
+            raise ValueError(
+                f"row missing numeric {spec.percent_column!r} column"
+            )
 
     indicator: dict = {
         "indicatorSlug": spec.slug,
@@ -158,13 +162,13 @@ def build_indicator(row: dict, spec: IndicatorSpec) -> dict:
 
 
 def run_patch(
-    rows: list[dict],
+    rows: list[dict[str, Any]],
     project_id: str,
     client: TMClient,
     spec: IndicatorSpec,
     *,
     apply: bool,
-    limit: Optional[int] = None,
+    limit: int | None = None,
 ) -> list[PatchOutcome]:
     """Patch every eligible *row* onto TerraMatch. Never raises for single-row failures."""
     try:
@@ -185,20 +189,26 @@ def run_patch(
         raw_uuid = row.get("poly_uuid")
         poly_uuid = "" if raw_uuid is None else str(raw_uuid)
         if not poly_uuid:
+            logger.error("Row has no poly_uuid — skipping (status=error)")
             outcomes.append(PatchOutcome(
                 poly_uuid="", polygon_id=None, status="error",
                 message="row has no poly_uuid",
             ))
             continue
         if poly_uuid not in known_ids:
+            logger.warning(
+                f"{poly_uuid}: not returned by /sitePolygons for project "
+                f"{project_id} — marking unmatched"
+            )
             outcomes.append(PatchOutcome(
-                poly_uuid=poly_uuid, polygon_id=None, status="unmatched",
+                poly_uuid=poly_uuid, polygon_id=poly_uuid, status="unmatched",
                 message="not returned by /sitePolygons for this project",
             ))
             continue
         try:
             indicator = build_indicator(row, spec)
         except ValueError as e:
+            logger.error(f"{poly_uuid}: skipping — {e}")
             outcomes.append(PatchOutcome(
                 poly_uuid=poly_uuid, polygon_id=poly_uuid,
                 status="error", message=str(e),

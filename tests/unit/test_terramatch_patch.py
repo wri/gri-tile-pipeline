@@ -150,7 +150,8 @@ def test_run_patch_continues_after_api_error(results_csv):
     rows, _ = load_results(results_csv)
     spec = IndicatorSpec(year=None, year_column="year",
                          uncertainty_column="ttc_shift_error")
-    ok = MagicMock(); ok.status_code = 200
+    ok = MagicMock()
+    ok.status_code = 200
     client = _client_with(
         ["poly-a", "poly-b"],
         patch_responses=[TMApiError(500, "boom"), ok],

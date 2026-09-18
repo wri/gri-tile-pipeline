@@ -6,21 +6,26 @@ import csv
 import json
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from gri_tile_pipeline.tracking.job_result import JobResult
+
+if TYPE_CHECKING:
+    import lithops
+
+    from gri_tile_pipeline.tracking.run_metadata import StepResult
 
 
 class JobTracker:
     """Centralized job tracking and reporting."""
 
     def __init__(self, output_dir: str = "job_reports", *,
-                 run_id: Optional[str] = None,
-                 step_name: Optional[str] = None):
+                 run_id: str | None = None,
+                 step_name: str | None = None) -> None:
         self.output_dir = output_dir
-        self.results: List[JobResult] = []
+        self.results: list[JobResult] = []
         self.start_time = datetime.now()
         self.run_id = run_id
         self.step_name = step_name
@@ -53,7 +58,7 @@ class JobTracker:
         n_partial = sum(1 for r in self.results if r.status == "partial")
         n_failed = total - n_success - n_partial
 
-        by_task: Dict[str, Dict[str, int]] = {}
+        by_task: dict[str, dict[str, int]] = {}
         for r in self.results:
             bucket = by_task.setdefault(
                 r.task_type,
@@ -72,8 +77,8 @@ class JobTracker:
         failed_tiles = [r.tile_info for r in self.results
                         if r.status not in ("success", "partial") and r.tile_info]
         # Deduplicate on (year, X_tile, Y_tile): one row per tile, not per task.
-        seen: set[tuple] = set()
-        deduped_failed: List[Dict[str, Any]] = []
+        seen: set[tuple[Any, Any, Any]] = set()
+        deduped_failed: list[dict[str, Any]] = []
         for ti in failed_tiles:
             key = (ti.get("year"), ti.get("X_tile"), ti.get("Y_tile"))
             if key in seen:
@@ -110,9 +115,9 @@ class JobTracker:
         logger.info(f"Run report -> {run_dir}")
         return run_dir
 
-    def _phase_rows(self) -> List[Tuple[Dict[str, Any], Dict[str, float], Optional[float]]]:
+    def _phase_rows(self) -> list[tuple[dict[str, Any], dict[str, float], float | None]]:
         """Return ``(tile_info, phase_timings, wallclock)`` for each tile with phase data."""
-        rows: List[Tuple[Dict[str, Any], Dict[str, float], Optional[float]]] = []
+        rows: list[tuple[dict[str, Any], dict[str, float], float | None]] = []
         for r in self.results:
             data = r.result_data or {}
             phases = data.get("phase_timings")
@@ -122,17 +127,17 @@ class JobTracker:
             rows.append((r.tile_info, {k: float(v) for k, v in phases.items()}, wallclock))
         return rows
 
-    def _phase_aggregates(self) -> Dict[str, Dict[str, float]]:
+    def _phase_aggregates(self) -> dict[str, dict[str, float]]:
         """Compute p50/p95/p99 + mean per phase across all tiles with phase data."""
         rows = self._phase_rows()
         if not rows:
             return {}
-        all_phases: Dict[str, List[float]] = {}
+        all_phases: dict[str, list[float]] = {}
         for _, phases, _ in rows:
             for name, sec in phases.items():
                 all_phases.setdefault(name, []).append(sec)
 
-        def _pct(vals: List[float], q: float) -> float:
+        def _pct(vals: list[float], q: float) -> float:
             if not vals:
                 return 0.0
             vs = sorted(vals)
@@ -155,13 +160,13 @@ class JobTracker:
         rows = self._phase_rows()
         if not rows:
             return
-        all_phase_names: List[str] = sorted({name for _, phases, _ in rows for name in phases})
+        all_phase_names: list[str] = sorted({name for _, phases, _ in rows for name in phases})
         fieldnames = ["year", "X_tile", "Y_tile", "wallclock_sec"] + all_phase_names
         with open(path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for tile_info, phases, wallclock in rows:
-                row: Dict[str, Any] = {
+                row: dict[str, Any] = {
                     "year": tile_info.get("year"),
                     "X_tile": tile_info.get("X_tile"),
                     "Y_tile": tile_info.get("Y_tile"),
@@ -171,7 +176,7 @@ class JobTracker:
                     row[name] = phases.get(name)
                 writer.writerow(row)
 
-    def _write_failed_tiles_csv(self, path: str, tiles: List[Dict[str, Any]]) -> None:
+    def _write_failed_tiles_csv(self, path: str, tiles: list[dict[str, Any]]) -> None:
         """Write failed tiles in tiles-CSV format (year, lon, lat, X_tile, Y_tile)."""
         from gri_tile_pipeline.tiles.csv_io import write_tiles_csv
         # csv_io.write_tiles_csv expects tile dicts with known keys; missing values
@@ -254,7 +259,7 @@ class JobTracker:
         errored = sum(1 for r in self.results if r.status == "error")
         infra_errored = sum(1 for r in self.results if r.status == "infra_error")
 
-        by_type: Dict[str, Dict[str, int]] = {}
+        by_type: dict[str, dict[str, int]] = {}
         for r in self.results:
             bucket = by_type.setdefault(
                 r.task_type,
@@ -320,7 +325,7 @@ class JobTracker:
         """
         from gri_tile_pipeline.tracking.run_metadata import StepResult
 
-        tile_map: Dict[str, StepResult] = {}
+        tile_map: dict[str, StepResult] = {}
         for r in self.results:
             if r.task_type.upper() not in _task_types_for_step(step_name):
                 continue
@@ -358,7 +363,7 @@ class JobTracker:
             f"out of {total} total"
         )
 
-        by_type: Dict[str, Dict[str, int]] = {}
+        by_type: dict[str, dict[str, int]] = {}
         for r in self.results:
             key = f"{r.task_type}-{r.region}"
             bucket = by_type.setdefault(key, {"success": 0, "partial": 0, "failed": 0})
@@ -381,10 +386,10 @@ def process_result(
     job_id: str,
     task_type: str,
     region: str,
-    tile_info: Dict[str, Any],
+    tile_info: dict[str, Any],
     result: Any,
-    stats: Optional[Dict[str, Any]],
-    duration: Optional[float],
+    stats: dict[str, Any] | None,
+    duration: float | None,
 ) -> None:
     """Process a single Lithops result and add to tracker."""
     if isinstance(result, dict):
@@ -442,10 +447,10 @@ def process_result(
 
 
 def wait_all_with_tracking(
-    retry_exec,
-    futures: List[Tuple[Any, str, str, Dict[str, Any]]],
+    retry_exec: "lithops.RetryingFunctionExecutor",
+    futures: list[tuple[Any, str, str, dict[str, Any]]],
     tracker: JobTracker,
-) -> List[Any]:
+) -> list[Any]:
     """Wait for all Lithops retrying futures and record results in *tracker*.
 
     Args:
@@ -466,9 +471,19 @@ def wait_all_with_tracking(
             future_objects, throw_except=False, wait_dur_sec=wait_dur_sec
         )
     except KeyError as e:
-        if "exc_info" in str(e):
+        # Lithops `_call_status` reads sometimes hit a partial JSON when a
+        # Lambda completed but only flushed part of its stats; the missing
+        # key trips an unguarded `_call_status[key]` access in
+        # lithops.future.status. Per-future fallback fetches each future
+        # individually and tags ones that still error as `infra_error`, so
+        # one bad call_status doesn't take down a multi-thousand-tile run.
+        # Known keys: "exc_info" (Alex 2026-02), "func_result_size"
+        # (2026-05 — sentinel-batch-flow project 60). Add new keys here as
+        # they surface rather than blanket-catching every KeyError, which
+        # would also swallow real bugs in this fallback path itself.
+        if any(k in str(e) for k in ("exc_info", "func_result_size")):
             logger.warning(f"Lithops status error — falling back to per-future: {e}")
-            results: List[Any] = []
+            results: list[Any] = []
             for rf, task_type, region, tile_info in futures:
                 job_id = f"{task_type}_{tile_info['X_tile']}_{tile_info['Y_tile']}_{tile_info['year']}"
                 try:
@@ -535,7 +550,7 @@ def _task_types_for_step(step_name: str) -> set[str]:
 
 def get_per_tile_status(tracker: JobTracker) -> dict[str, str]:
     """Return ``{tile_key: "success"|"failed"}`` from tracker results."""
-    status: Dict[str, str] = {}
+    status: dict[str, str] = {}
     for r in tracker.results:
         key = f"{r.tile_info.get('X_tile')}X{r.tile_info.get('Y_tile')}Y"
         if key not in status:

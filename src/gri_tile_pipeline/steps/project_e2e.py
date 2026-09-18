@@ -10,7 +10,6 @@ Supports two input modes:
 
 from __future__ import annotations
 
-import csv as csv_mod
 import os
 import tempfile
 from collections import Counter
@@ -101,7 +100,7 @@ def _extract_project(
     if year_override is not None:
         gdf["pred_year"] = year_override
     else:
-        def _derive_year(ps):
+        def _derive_year(ps: Any) -> int | None:
             if ps is not None and hasattr(ps, "year"):
                 return ps.year - 1
             return None
@@ -283,7 +282,7 @@ def _extract_by_filter(
     if year_override is not None:
         gdf["pred_year"] = year_override
     else:
-        def _derive_year(ps):
+        def _derive_year(ps: Any) -> int | None:
             if ps is not None and hasattr(ps, "year"):
                 return ps.year - 1
             return None
@@ -372,7 +371,7 @@ def _identify_tiles(
 def _resolve_tiles_bucket(dest: str) -> str:
     """Extract tiles_bucket value from dest for zonal stats.
 
-    For S3: returns bucket name (e.g. 'tof-output')
+    For S3: returns bucket name (e.g. 'wri-restoration-geodata-ttc')
     For local: returns the local path as-is
     """
     if dest.startswith("s3://"):
@@ -511,7 +510,7 @@ def run_project_pipeline(
     years_needed = sorted(year_counts.keys())
 
     # ── Step 2: Report TTC coverage ──
-    logger.info(f"Step 2/7: TTC coverage report")
+    logger.info("Step 2/7: TTC coverage report")
     logger.info(
         f"  Source: {label} ({meta['country']}, {meta['framework_key']})"
     )
@@ -694,6 +693,7 @@ def run_project_pipeline(
 
                     pred_tracker = run_predict_local(
                         predict_csv, dest, cfg,
+                        model_path=cfg.predict.model_path,
                         skip_existing=skip_existing,
                         max_workers=max_workers,
                     )

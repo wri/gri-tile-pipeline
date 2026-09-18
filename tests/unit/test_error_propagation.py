@@ -1,6 +1,5 @@
 """Tests for zonal error propagation matching reference behavior."""
 
-import math
 import pytest
 
 

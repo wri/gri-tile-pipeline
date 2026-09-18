@@ -21,12 +21,32 @@ import tempfile
 import time
 import traceback
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import numpy as np
 from loguru import logger
 
 from gri_tile_pipeline.phase_timer import PhaseTimer, timed
+
+if TYPE_CHECKING:
+    # Only needed for type annotations below; the real `obstore` import stays
+    # deferred into function bodies (see module docstring — this is a Lambda
+    # worker, so module-level imports are kept minimal for cold-start time).
+    from obstore.store import ObjectStore
+
+
+class NoS2DataError(ValueError):
+    """No S2 acquisitions available for this tile/year.
+
+    Raised by ``predict_tile_from_arrays`` when the ARD has zero S2
+    timesteps — e.g. download_s2's STAC search returned no items, or the
+    SCL cloud filter dropped every candidate. Without S2 the predict
+    pipeline can't run (target dims H,W are derived from s2_20 shape),
+    and silently propagating an empty array surfaces downstream as an
+    ``OverflowError: cannot convert float infinity to integer`` inside
+    ``sk_resize``. Subclasses ValueError so existing ``except ValueError``
+    blocks still catch it.
+    """
 
 
 _MODEL_SHA256_CACHE: Dict[str, str] = {}
@@ -34,7 +54,7 @@ _MODEL_SHA256_CACHE: Dict[str, str] = {}
 # Files the Dockerfile bakes the pipeline git sha into. Checked in order;
 # first non-empty read wins. Kept in sync with `COPY docker/.git_sha ...`
 # in docker/PredictDockerfile.
-_GIT_SHA_FILES = ("/function/.git_sha", "/var/task/.git_sha")
+_GIT_SHA_FILES: tuple[str, ...] = ("/function/.git_sha", "/var/task/.git_sha")
 
 
 def _resolve_container_git_sha() -> Optional[str]:
@@ -117,7 +137,7 @@ def _build_provenance(
     }
 
 
-def _load_hkl(store, key: str):
+def _load_hkl(store: "ObjectStore", key: str) -> np.ndarray:
     """Download an HKL file from obstore and load it."""
     import hickle as hkl
     import obstore as obs
@@ -133,7 +153,7 @@ def _load_hkl(store, key: str):
         os.remove(tmp.name)
 
 
-def _load_hkl_local(path: str):
+def _load_hkl_local(path: str) -> np.ndarray:
     """Load an HKL file from local filesystem."""
     import hickle as hkl
     return hkl.load(path)
@@ -172,7 +192,7 @@ def _cog_write(dst_path: str, arr: np.ndarray, lon: float, lat: float) -> None:
         dst.write(arr, 1)
 
 
-def _write_geotiff(store, key: str, arr: np.ndarray, lon: float, lat: float):
+def _write_geotiff(store: "ObjectStore", key: str, arr: np.ndarray, lon: float, lat: float) -> None:
     """Write the prediction COG to *store* at *key*."""
     import obstore as obs
 
@@ -186,7 +206,7 @@ def _write_geotiff(store, key: str, arr: np.ndarray, lon: float, lat: float):
         os.remove(tmp.name)
 
 
-def _write_geotiff_local(path: str, arr: np.ndarray, lon: float, lat: float):
+def _write_geotiff_local(path: str, arr: np.ndarray, lon: float, lat: float) -> None:
     """Write the prediction COG directly to a local *path*."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     _cog_write(path, arr, lon, lat)
@@ -219,7 +239,7 @@ def _build_stac_item(
     )
 
 
-def _write_stac_sidecar(store, key: str, item: Dict[str, Any]) -> None:
+def _write_stac_sidecar(store: "ObjectStore", key: str, item: Dict[str, Any]) -> None:
     """Upload the STAC Item JSON next to the COG."""
     import obstore as obs
 
@@ -263,8 +283,8 @@ def predict_tile_from_arrays(
     clm: Optional[np.ndarray] = None,
     length: int = 4,
     enable_cloud_removal: bool = True,
-    diagnostics: Optional[Dict] = None,
-    intermediates: Optional[Dict] = None,
+    diagnostics: Optional[Dict[str, Any]] = None,
+    intermediates: Optional[Dict[str, Any]] = None,
     seed: Optional[int] = None,
     timer: Optional["PhaseTimer"] = None,
 ) -> np.ndarray:
@@ -277,10 +297,28 @@ def predict_tile_from_arrays(
         s2_20: (T, H2, W2, 6) uint16 or float32 — 20m S2 bands
         s1: (T_s1, H_s1, W_s1, 2) uint16 or float32 — S1 VV, VH
         dem: (H, W) float32 — DEM elevation
-        clouds: (T, H, W) bool or similar — cloud mask
+        clouds: (T, H, W) bool or similar — cloud mask.
+            NOTE (found during type-hint review, not yet resolved): this
+            parameter is currently unused below — cloud detection instead
+            runs from scratch via ``identify_clouds_shadows(s2_full, dem)``,
+            and the only external cloud-probability input actually wired in
+            is ``clm``. Both callers (``run`` and ``run_local``) still load
+            and pass a real array here, so either this should be feeding
+            into the cloud-removal step the way ``clm`` does (check the
+            reference ``download_and_predict_job.py`` for how the
+            precomputed clouds.hkl array is meant to be used), or the
+            ARD load of clouds.hkl is now pure overhead and this parameter
+            should be removed. Left as-is pending a decision.
         s2_dates: array of dates
         model_path: path to directory containing predict_graph-172.pb
-        length: temporal sequence length (4 = quarterly, default)
+        length: temporal sequence length (4 = quarterly, default).
+            NOTE (found during type-hint review, not yet resolved): only
+            the default of 4 is actually supported end-to-end today — the
+            quarterly-reduction reshapes below (``s2_12.reshape(4, 3, ...)``
+            etc.) hardcode 4 quarters of 3 months regardless of this value,
+            so passing anything else would raise a shape-mismatch error at
+            ``feature_stack[:length, ...] = s2_q``. Currently dormant since
+            neither caller passes a non-default ``length``.
         enable_cloud_removal: run multi-temporal cloud removal (default True)
         diagnostics: if provided, intermediate outputs are stored into this dict
 
@@ -338,7 +376,7 @@ def predict_tile_from_arrays(
                 s1[i, :, :, b][sat_mask] = med
 
     # Convert S1 linear backscatter to dB (reference lines 790-791)
-    def _convert_to_db(x, min_db=22):
+    def _convert_to_db(x: np.ndarray, min_db: float = 22) -> np.ndarray:
         x = 10 * np.log10(x + 1 / 65535)
         x[x < -min_db] = -min_db
         x = (x + min_db) / min_db
@@ -374,6 +412,40 @@ def predict_tile_from_arrays(
     # ------------------------------------------------------------------
     # 2. Align spatial dimensions: target = 2 × s2_20 shape (reference lines 800-806)
     # ------------------------------------------------------------------
+    # First defend against a temporal-axis mismatch between the s2 arrays
+    # and s2_dates. The loader normally writes them in lockstep, but for
+    # some tiles (observed: 1749X1160Y / 1749X1161Y on PADO 2021) the
+    # s2_dates.hkl came back with one fewer entry than s2_10.hkl — every
+    # subsequent np.delete / fancy-indexing step on the two arrays then
+    # diverges, eventually surfacing as "index 23 is out of bounds for
+    # axis 0 with size 23" inside the cloud-pruning loop. Truncate the
+    # other arrays to the common length so all per-timestep operations
+    # see the same T from here on.
+    T_common = min(s2_10.shape[0], s2_20.shape[0], len(s2_dates))
+    if (s2_10.shape[0] != T_common or s2_20.shape[0] != T_common
+            or len(s2_dates) != T_common):
+        logger.warning(
+            "ARD temporal axes out of sync — truncating to T=%d "
+            "(s2_10=%d, s2_20=%d, s2_dates=%d)",
+            T_common, s2_10.shape[0], s2_20.shape[0], len(s2_dates),
+        )
+        s2_10    = s2_10[:T_common]
+        s2_20    = s2_20[:T_common]
+        s2_dates = s2_dates[:T_common]
+
+    # H/W are derived from s2_20 below; if T==0 the spatial dims are also
+    # zero (download_s2 writes (0,0,0,N) when STAC returns no items or
+    # SCL drops every candidate), and sk_resize to a (0,0) target divides
+    # by zero in scipy.ndimage.gaussian_filter1d → int(inf) overflow.
+    # Bail out before we get there so the failure is named, not cryptic.
+    if T_common == 0:
+        raise NoS2DataError(
+            f"No S2 acquisitions for tile (s2_10={s2_10.shape}, "
+            f"s2_20={s2_20.shape}, s2_dates={s2_dates.shape}). "
+            "Check upstream download_s2 — likely STAC returned no items "
+            "or the SCL cloud filter dropped every candidate."
+        )
+
     T = s2_10.shape[0]
     H = s2_20.shape[1] * 2  # target height (rows)
     W = s2_20.shape[2] * 2  # target width (cols)
@@ -522,9 +594,16 @@ def predict_tile_from_arrays(
             keep = np.setdiff1d(np.arange(s2_full.shape[0]), to_drop)
             s2_full = s2_full[keep]
             s2_dates = s2_dates[keep]
-            # Also prune CLM to match
+            # Also prune CLM to match. clm can be shorter than s2_full (the
+            # clouds.hkl loader sometimes omits the trailing timesteps;
+            # downstream code handles this at line 503 via
+            # `clm[:s2_full.shape[0]]`). Filter to_drop to clm-valid
+            # indices so np.delete doesn't blow up on indices that don't
+            # exist in clm.
             if clm is not None:
-                clm = np.delete(clm, to_drop, axis=0)
+                clm_drops = to_drop[to_drop < clm.shape[0]]
+                if len(clm_drops):
+                    clm = np.delete(clm, clm_drops, axis=0)
             # Re-detect clouds on reduced image stack
             cloud_probs, fcps = identify_clouds_shadows(s2_full, dem_raw)
             # Re-merge CLM after re-detection (reference lines 959-965)
@@ -719,6 +798,8 @@ def predict_tile_from_arrays(
     # ------------------------------------------------------------------
     # 8. Quarterly reduction: 12 monthly → 4 quarterly via median
     #    (reference lines 1394-1398: reshape (12,...) → (4,3,...), median axis=1)
+    #    NOTE: hardcodes 4x3 regardless of `length` — see the `length` note
+    #    in the docstring above. Currently fine since length is always 4.
     # ------------------------------------------------------------------
     s2_q = np.median(s2_12.reshape(4, 3, H, W, 10), axis=1)        # (4, H, W, 10)
     indices_q = np.median(indices_12.reshape(4, 3, H, W, 4), axis=1)  # (4, H, W, 4)
@@ -809,13 +890,19 @@ def run(
     seed: Optional[int] = None,
     prediction_key_override: Optional[str] = None,
     ard_keys_override: Optional[Dict[str, str]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """Lithops entry-point for single-tile prediction.
 
     ``prediction_key_override`` / ``ard_keys_override`` are used by parity
     tooling to (a) avoid clobbering the production FINAL.tif and (b) read ARD
     from non-canonical paths. Production callers leave both as None.
+
+    NOTE (found during type-hint review, not yet resolved): ``debug`` is
+    accepted but never read anywhere below — no logging or verbosity change
+    is currently tied to it. Left as-is pending a decision on whether it
+    should gate something (e.g. passing `diagnostics=`/`intermediates=`
+    dicts into ``predict_tile_from_arrays``) or be removed.
 
     Returns a structured dict with ``status``, ``error_message``, etc.
     """
@@ -858,13 +945,35 @@ def run(
                 "s2_dates": f"{base_key}/misc/s2_dates_{tag}.hkl",
             }
             logger.info(f"Loading ARD for {tag}")
-        with timed(phase_timer, "s3_download_hkl"):
-            s2_10    = _load_hkl(store, ard_keys["s2_10"])
-            s2_20    = _load_hkl(store, ard_keys["s2_20"])
-            s1       = _load_hkl(store, ard_keys["s1"])
-            dem      = _load_hkl(store, ard_keys["dem"])
-            clouds   = _load_hkl(store, ard_keys["clouds"])
-            s2_dates = _load_hkl(store, ard_keys["s2_dates"])
+        try:
+            with timed(phase_timer, "s3_download_hkl"):
+                s2_10    = _load_hkl(store, ard_keys["s2_10"])
+                s2_20    = _load_hkl(store, ard_keys["s2_20"])
+                s1       = _load_hkl(store, ard_keys["s1"])
+                dem      = _load_hkl(store, ard_keys["dem"])
+                clouds   = _load_hkl(store, ard_keys["clouds"])
+                s2_dates = _load_hkl(store, ard_keys["s2_dates"])
+        except FileNotFoundError as e:
+            # A required ARD artifact never landed — most commonly
+            # raw/s1/<tile>.hkl, when the S1 RTC -> Earth Search GRD fallback
+            # couldn't recover the tile (download reports the S1 leg
+            # "recovered" but writes nothing). Predict can't run without it,
+            # but a single gap tile must not fail the whole batch. Return a
+            # non-fatal "partial" so run_predict's (status not in
+            # success/partial) gate skips it; the tile produces no prediction
+            # and its polygons fall through to compute_ttc's no-coverage skip.
+            # Scoped to the ARD load so a genuinely missing model/other file
+            # still surfaces as a hard failure below.
+            logger.warning(f"predict_tile no-data skip for {tag}: missing ARD artifact: {e}")
+            return {
+                "status": "partial",
+                "error_message": str(e),
+                "error_type": "no_data",
+                "tile": tag,
+                "year": year,
+                "phase_timings": phase_timer.as_dict(),
+                "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
+            }
 
         # -------------------------------------------------------
         # 2-8. Run prediction pipeline
@@ -933,8 +1042,29 @@ def run(
             "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
         }
 
+    except NoS2DataError as e:
+        # No usable S2 acquisitions for this tile — a coverage gap, not a
+        # pipeline failure. Return non-fatal "partial" so run_predict's
+        # `status not in (success, partial)` gate skips it rather than failing
+        # the whole batch; the tile's polygons fall through to compute_ttc's
+        # no-coverage skip. (Missing ARD *artifacts* are handled with the same
+        # semantics at the load step above.)
+        logger.warning(f"predict_tile no-data skip for {tag}: {e}")
+        return {
+            "status": "partial",
+            "error_message": str(e),
+            "error_type": "no_data",
+            "tile": tag,
+            "year": year,
+            "phase_timings": phase_timer.as_dict(),
+            "wallclock_sec": round(time.perf_counter() - wallclock_start, 4),
+        }
     except Exception as e:
-        logger.error(f"predict_tile failed for {tag}: {e}")
+        # Log the full traceback to CloudWatch so we can diagnose without
+        # having to fish through Lithops result dicts. The traceback is
+        # also returned in `error_traceback` (below) but CloudWatch is
+        # easier to read live.
+        logger.error(f"predict_tile failed for {tag}: {e}\n{traceback.format_exc()}")
         return {
             "status": "failed",
             "error_message": str(e),
@@ -980,12 +1110,15 @@ def run_local(
     import glob
 
     # Find HKL files
-    s2_10 = hkl.load(glob.glob(f"{ard_dir}/s2_10/*.hkl")[0])
-    s2_20 = hkl.load(glob.glob(f"{ard_dir}/s2_20/*.hkl")[0])
-    s1 = hkl.load(glob.glob(f"{ard_dir}/s1/*.hkl")[0])
-    dem = hkl.load(glob.glob(f"{ard_dir}/misc/dem_*.hkl")[0])
-    clouds = hkl.load(glob.glob(f"{ard_dir}/clouds/clouds_*.hkl")[0])
-    s2_dates = hkl.load(glob.glob(f"{ard_dir}/misc/s2_dates_*.hkl")[0])
+    # (annotated explicitly since hkl.load's return type is untyped —
+    # hickle ships no py.typed marker/stubs — so without these the calls
+    # into predict_tile_from_arrays below would go unchecked)
+    s2_10: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/s2_10/*.hkl")[0])
+    s2_20: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/s2_20/*.hkl")[0])
+    s1: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/s1/*.hkl")[0])
+    dem: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/misc/dem_*.hkl")[0])
+    clouds: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/clouds/clouds_*.hkl")[0])
+    s2_dates: np.ndarray = hkl.load(glob.glob(f"{ard_dir}/misc/s2_dates_*.hkl")[0])
 
     logger.info(f"Loaded ARD: s2_10={s2_10.shape}, s2_20={s2_20.shape}, "
                 f"s1={s1.shape}, dem={dem.shape}")
@@ -1019,3 +1152,4 @@ def run_local(
         logger.info(f"Wrote {sidecar_path}")
 
     return predictions
+

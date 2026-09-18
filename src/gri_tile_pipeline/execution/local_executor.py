@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable
 
 from loguru import logger
 
@@ -13,11 +13,11 @@ from gri_tile_pipeline.tracking import JobTracker, JobResult
 
 
 def _invoke_worker(
-    worker_fn: Callable,
-    kwargs: Dict[str, Any],
+    worker_fn: Callable[..., dict[str, Any]],
+    kwargs: dict[str, Any],
     task_type: str,
     tracker: JobTracker,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Call *worker_fn* with *kwargs* and record the result in *tracker*."""
     tile_info = {
         k: kwargs[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile") if k in kwargs
@@ -79,9 +79,9 @@ def _invoke_worker(
 
 
 def run_local_tasks(
-    worker_fn: Callable,
+    worker_fn: Callable[..., dict[str, Any]],
     task_type: str,
-    kwargs_list: List[Dict[str, Any]],
+    kwargs_list: list[dict[str, Any]],
     tracker: JobTracker,
     max_workers: int = 1,
 ) -> None:

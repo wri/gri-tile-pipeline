@@ -16,6 +16,9 @@ aws_lambda:
   user_tags:
     name: "wri:project"
     value: "GRI-ttc"
+  # Pin user_id so build host identity is irrelevant (last-4 lowercased
+  # chars form the ECR repo suffix). See feedback_lithops_user_key.md.
+  user_id: wri-ttc-shared-o56c
 
 aws_s3:
   region: us-west-2

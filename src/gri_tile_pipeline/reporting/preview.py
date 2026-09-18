@@ -7,9 +7,14 @@ environments without a plotting backend (the import only fails when
 
 from __future__ import annotations
 
-import sys
+from typing import TYPE_CHECKING
 
 from gri_tile_pipeline.duckdb_utils import connect_with_spatial
+
+if TYPE_CHECKING:
+    import geopandas as gpd
+
+    from gri_tile_pipeline.config import PipelineConfig
 
 
 # ~10m in degrees, matching error_propagation.py
@@ -26,7 +31,7 @@ SHIFT_DIRECTIONS = {
 }
 
 
-def load_polygon(poly_uuid: str, geoparquet: str):
+def load_polygon(poly_uuid: str, geoparquet: str) -> tuple["gpd.GeoDataFrame", int]:
     """Load a single polygon by poly_uuid, return (GeoDataFrame, default_year).
 
     default_year is plantstart - 1 if available, else 2020.
@@ -58,7 +63,7 @@ def load_polygon(poly_uuid: str, geoparquet: str):
 
 
 def render_preview(
-    gdf,
+    gdf: "gpd.GeoDataFrame",
     tile_paths: list[str],
     year: int,
     poly_uuid: str,
@@ -134,7 +139,7 @@ def render_preview(
 
 def preview_polygon(
     poly_uuid: str,
-    cfg,
+    cfg: "PipelineConfig",
     *,
     year: int | None = None,
     geoparquet: str = "temp/tm.geoparquet",

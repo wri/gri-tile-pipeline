@@ -8,10 +8,13 @@ building enormous mosaics for geographically scattered projects.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import List, Tuple
+from typing import TYPE_CHECKING
 
 import pandas as pd
 from loguru import logger
+
+if TYPE_CHECKING:
+    import geopandas as gpd
 
 
 class UnionFind:
@@ -48,7 +51,7 @@ def cluster_polygons_by_tiles(
     gdf: "gpd.GeoDataFrame",
     global_lookup: pd.DataFrame,
     tile_size: float = 1 / 18,
-) -> List[Tuple["gpd.GeoDataFrame", pd.DataFrame]]:
+) -> list[tuple["gpd.GeoDataFrame", pd.DataFrame]]:
     """Group polygons into spatial clusters based on shared tiles.
 
     Uses a single DuckDB spatial join (all polygons x all tiles) followed
@@ -134,7 +137,7 @@ def cluster_polygons_by_tiles(
         lambda g: g.values.tolist()
     )
 
-    clusters: List[Tuple["gpd.GeoDataFrame", pd.DataFrame]] = []
+    clusters: list[tuple["gpd.GeoDataFrame", pd.DataFrame]] = []
     gdf_reset = gdf.reset_index(drop=True)
 
     for _root, indices in components.items():

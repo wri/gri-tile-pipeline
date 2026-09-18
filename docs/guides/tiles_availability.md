@@ -33,18 +33,18 @@ predicting. Simplest single-command path.
 
 ```bash
 # Classic: short_name with plantstart-derived year
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --check-only --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --check-only --yes
 
 # Override prediction year
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --year 2025 --check-only --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --year 2025 --check-only --yes
 
 # Any filter flag works in place of the short_name positional:
 gri-ttc run-project --framework-key terrafund-landscapes \
-    --dest s3://tof-output --check-only --yes
+    --dest s3://wri-restoration-geodata-ttc --check-only --yes
 gri-ttc run-project --poly-uuid abc-123 --poly-uuid def-456 \
-    --year 2023 --dest s3://tof-output --check-only --yes
+    --year 2023 --dest s3://wri-restoration-geodata-ttc --check-only --yes
 gri-ttc run-project --where "country='GHA' AND YEAR(plantstart)=2023" \
-    --dest s3://tof-output --check-only --yes
+    --dest s3://wri-restoration-geodata-ttc --check-only --yes
 ```
 
 Output: `temp/<label>_missing_tiles.csv` (override with `-o`). Same
@@ -91,7 +91,7 @@ datasets, one-off analyses). The file must be in EPSG:4326.
 ```bash
 gri-ttc check polygons.geojson \
     --year 2023 \
-    --dest s3://tof-output \
+    --dest s3://wri-restoration-geodata-ttc \
     --check-type predictions \
     -o missing.csv
 ```
@@ -105,7 +105,7 @@ If the polygon file has a `plantstart` column, derive year per-polygon:
 ```bash
 gri-ttc check polygons.geojson \
     --year-from-plantstart \
-    --dest s3://tof-output \
+    --dest s3://wri-restoration-geodata-ttc \
     -o missing.csv
 ```
 
@@ -127,7 +127,7 @@ or a previous run):
 ```bash
 gri-ttc resolve --short-name GHA_22_INEC -o tiles.csv    # optional if you don't have one
 gri-ttc tiles validate tiles.csv                          # sanity-check schema
-gri-ttc check tiles.csv --dest s3://tof-output -o missing.csv
+gri-ttc check tiles.csv --dest s3://wri-restoration-geodata-ttc -o missing.csv
 ```
 
 This is the most granular path — useful when you've already filtered,
@@ -149,7 +149,7 @@ chunked, or massaged the tile list by other means.
 ## Feed the missing list into compute
 
 ```bash
-gri-ttc run missing.csv --dest s3://tof-output \
+gri-ttc run missing.csv --dest s3://wri-restoration-geodata-ttc \
     --steps download,predict --yes
 ```
 
@@ -163,6 +163,6 @@ for fuller treatment of each path.
 | Symptom | Likely cause | Fix |
 | ------- | ------------ | --- |
 | `check` finds nothing missing but predictions look wrong | Wrong `--check-type` (e.g. raw_ard when you meant predictions) | Re-run with `--check-type predictions` |
-| `NoSuchBucket` / `AccessDenied` on `tof-output` | Cross-account policy not applied or expired SSO | See [manual_wri_policy_update.md](../manual_wri_policy_update.md) and re-run `aws sso login` |
+| `NoSuchBucket` / `AccessDenied` on `wri-restoration-geodata-ttc` | Expired SSO or IAM role lacks access | Re-run `aws sso login` and confirm the role has `s3:GetObject`/`PutObject` on the bucket |
 | `No tiles resolved from input` | Empty filter — no polygons matched | Run the same filter under `gri-ttc report --skip-s3` to see the scope |
 | Too many `missing.csv` rows on a known-good project | You're checking ARD when predictions already exist | `--check-type predictions` instead of `--check-type raw_ard` |

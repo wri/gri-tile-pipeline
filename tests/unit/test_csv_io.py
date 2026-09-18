@@ -1,7 +1,5 @@
 """Unit tests for tiles/csv_io.py."""
 
-import os
-import tempfile
 
 import pytest
 

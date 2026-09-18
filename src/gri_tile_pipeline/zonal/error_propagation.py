@@ -16,8 +16,18 @@ import contextlib
 import math
 import os
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    # TYPE_CHECKING-only imports -- geopandas/shapely stay lazily
+    # imported at runtime inside each function (matching the rest of
+    # this module); this just gives the forward-referenced
+    # "gpd.GeoDataFrame" / "BaseGeometry" annotations below something
+    # to resolve against for mypy.
+    import geopandas as gpd
+    from shapely.geometry.base import BaseGeometry
 
 import numpy as np
 import pandas as pd
@@ -32,7 +42,7 @@ def _is_remote_path(path: str) -> bool:
 
 
 @contextlib.contextmanager
-def _rasterio_env(path: str):
+def _rasterio_env(path: str) -> Iterator[None]:
     """Yield a rasterio.Env configured for efficient COG reads when *path* is remote.
 
     For local paths this is a no-op.
@@ -82,7 +92,7 @@ def _load_region_conf() -> pd.DataFrame:
     return pd.read_csv(_DATA_DIR / "region_conf.csv")
 
 
-def _load_subregions():
+def _load_subregions() -> "gpd.GeoDataFrame | None":
     """Load subregion polygons with confidence interval properties.
 
     Returns GeoDataFrame or None if file doesn't exist.
@@ -101,7 +111,7 @@ def _load_subregions():
 
 def shift_error(
     mosaic_path: str,
-    geometry,
+    geometry: "BaseGeometry",
     base_ttc: float,
     offset: float = 0.0001081081,  # ~10m in degrees (from reference config)
 ) -> float:
@@ -153,7 +163,6 @@ def shift_error(
 
     if not percent_errors:
         return 0.0
-    # RMS of percent errors over 8 shifts (matching reference)
     return float((sum(percent_errors) / 8) ** 0.5)
 
 
@@ -188,7 +197,7 @@ def small_site_error(
 def lulc_error(
     expected_ttc: float,
     lulc_category: str = "forest",
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Lookup LULC confidence interval error.
 
     Reference formula:
@@ -213,10 +222,10 @@ def lulc_error(
 
 
 def subregion_error(
-    geometry,
+    geometry: "BaseGeometry",
     expected_ttc: float,
-    subregions_gdf=None,
-) -> Tuple[Optional[str], float, float]:
+    subregions_gdf: "gpd.GeoDataFrame | None" = None,
+) -> tuple[Optional[str], float, float]:
     """Compute subregion error via spatial join with subregion boundaries.
 
     Reference formula:
@@ -233,6 +242,12 @@ def subregion_error(
         return None, 0.0, 0.0
 
     centroid = geometry.centroid
+    # NOTE: no CRS check/alignment between `geometry` and `subregions_gdf`
+    # before this spatial test — same bug class fixed in
+    # reporting/preview.py's render_preview (a CRS mismatch here would
+    # silently produce wrong/empty intersections, not an error). Not
+    # changed here since both current call sites use EPSG:4326
+    # throughout; flagged for follow-up if that stops being guaranteed.
     intersecting = subregions_gdf[subregions_gdf.intersects(centroid)]
 
     if intersecting.empty:
@@ -255,7 +270,7 @@ def combine_errors(
     lulc_upper: float,
     subregion_lower: float,
     subregion_upper: float,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Combine all 4 error sources in quadrature.
 
     Returns dict with ``error_plus``, ``error_minus``,
@@ -282,7 +297,7 @@ def combine_errors(
 # LULC raster integration
 # -----------------------------------------------------------------------
 
-def prep_lulc_data(polygons_gdf, lulc_raster_path: str, temp_dir: str) -> str:
+def prep_lulc_data(polygons_gdf: "gpd.GeoDataFrame", lulc_raster_path: str, temp_dir: str) -> str:
     """Clip ESA WorldCover raster to project bounds.
 
     Reprojects polygons to EPSG:3857, buffers 500m, clips global LULC
@@ -315,7 +330,7 @@ def prep_lulc_data(polygons_gdf, lulc_raster_path: str, temp_dir: str) -> str:
     return output
 
 
-def get_lulc_category(geometry, clipped_lulc_path: str) -> str:
+def get_lulc_category(geometry: "BaseGeometry", clipped_lulc_path: str) -> str:
     """Get majority LULC category for a polygon via zonal stats.
 
     Returns lowercase category name (e.g. 'forest', 'cropland').
@@ -349,11 +364,11 @@ def _clamp_inf(val: float) -> float:
 # -----------------------------------------------------------------------
 
 def compute_errors(
-    results_gdf,
+    results_gdf: "gpd.GeoDataFrame",
     cfg: PipelineConfig,
     mosaic_path: Optional[str] = None,
     lulc_raster_path: Optional[str] = None,
-    polygons_gdf=None,
+    polygons_gdf: "gpd.GeoDataFrame | None" = None,
 ) -> pd.DataFrame:
     """Add error columns to a TTC results GeoDataFrame.
 

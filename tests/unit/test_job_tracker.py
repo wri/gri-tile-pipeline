@@ -6,7 +6,11 @@ import os
 import pytest
 
 from gri_tile_pipeline.tracking.job_result import JobResult
-from gri_tile_pipeline.tracking.job_tracker import JobTracker, get_per_tile_status
+from gri_tile_pipeline.tracking.job_tracker import (
+    JobTracker,
+    get_per_tile_status,
+    wait_all_with_tracking,
+)
 
 
 def _make_result(status: str, x: int = 1000, y: int = 871) -> JobResult:
@@ -80,3 +84,77 @@ class TestGetPerTileStatus:
         status = get_per_tile_status(tracker)
         assert status["1000X871Y"] == "success"
         assert status["1001X872Y"] == "failed"
+
+
+class _FakeResponseFuture:
+    """Stand-in for lithops.future.ResponseFuture in the per-future fallback path.
+
+    The fallback in wait_all_with_tracking calls .result() and reads .stats —
+    both behaviors are reproduced here.
+    """
+
+    def __init__(self, result_value=None, raises=None):
+        self._result_value = result_value
+        self._raises = raises
+        self.stats = {"worker_exec_time": 1.23}
+
+    def result(self, throw_except=False):
+        if self._raises is not None:
+            raise self._raises
+        return self._result_value
+
+
+class _FakeRetryingFuture:
+    def __init__(self, rf):
+        self.response_future = rf
+
+
+class _FakeRetryExec:
+    """retry_exec.wait() raises a Lithops-style KeyError on the first call.
+
+    Mimics the partial-call_status symptom that prompted the fallback path.
+    """
+
+    def __init__(self, key):
+        self._key = key
+
+    def wait(self, *args, **kwargs):
+        raise KeyError(self._key)
+
+
+class TestWaitAllWithTrackingFallback:
+    """Per-future fallback when retry_exec.wait raises a Lithops KeyError.
+
+    See job_tracker.wait_all_with_tracking — the partial-call_status JSON
+    in Lithops trips a `_call_status[key]` access; recognized keys fall
+    back to per-future polling so one bad status doesn't take the run down.
+    """
+
+    @pytest.mark.parametrize("key", ["exc_info", "func_result_size"])
+    def test_recognized_key_falls_back(self, tmp_path, key):
+        tracker = JobTracker(output_dir=str(tmp_path))
+        rf_ok = _FakeRetryingFuture(_FakeResponseFuture(result_value={"out": "ok"}))
+        rf_bad = _FakeRetryingFuture(_FakeResponseFuture(raises=RuntimeError("boom")))
+        futures = [
+            (rf_ok,  "DEM", "us-west-2", {"X_tile": 1, "Y_tile": 2, "year": 2024, "lon": 0.0, "lat": 0.0}),
+            (rf_bad, "DEM", "us-west-2", {"X_tile": 3, "Y_tile": 4, "year": 2024, "lon": 0.0, "lat": 0.0}),
+        ]
+
+        results = wait_all_with_tracking(_FakeRetryExec(key), futures, tracker)
+
+        assert len(results) == 2
+        statuses = {r.tile_info["X_tile"]: r.status for r in tracker.results}
+        assert statuses[3] == "infra_error"
+        # The successful future's status comes from process_result() based on
+        # the result payload — we only assert the bad one tagged correctly,
+        # since that's the behavior under test.
+
+    def test_unknown_key_reraises(self, tmp_path):
+        tracker = JobTracker(output_dir=str(tmp_path))
+        rf = _FakeRetryingFuture(_FakeResponseFuture(result_value={"out": "ok"}))
+        futures = [
+            (rf, "DEM", "us-west-2", {"X_tile": 1, "Y_tile": 2, "year": 2024, "lon": 0.0, "lat": 0.0}),
+        ]
+
+        with pytest.raises(KeyError):
+            wait_all_with_tracking(_FakeRetryExec("unrelated_bug_key"), futures, tracker)

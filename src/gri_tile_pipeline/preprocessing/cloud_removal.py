@@ -20,7 +20,7 @@ Functions fall into three groups:
 from __future__ import annotations
 
 import random
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 from loguru import logger
@@ -303,7 +303,7 @@ def identify_clouds_shadows(
     clouds = np.zeros_like(shadows, dtype=np.float32)
 
     # Initial Hollstein cloud mask for shadow detection
-    def _hollstein_cld(arr):
+    def _hollstein_cld(arr: np.ndarray) -> np.ndarray:
         step1 = arr[..., 7] > 0.166
         step2b = arr[..., 1] > 0.28
         step3 = arr[..., 5] / arr[..., 8] < 4.292
@@ -540,7 +540,6 @@ def identify_clouds_shadows(
         clouds[i][brightness_threshold.astype(bool)] = 0.0
 
     # Dilate clouds
-    struct2 = generate_binary_structure(2, 2)
     for i in range(clouds.shape[0]):
         clouds[i] = 1 - (binary_dilation(clouds[i] == 0, iterations=1))
         pfcps[i] = binary_dilation(pfcps[i], iterations=5)
@@ -635,7 +634,7 @@ def identify_clouds_shadows(
 
 def id_areas_to_interp(
     probs: np.ndarray,
-    **_kwargs,
+    **_kwargs: Any,
 ) -> np.ndarray:
     """Build soft interpolation masks from cloud probability maps.
 
@@ -818,7 +817,6 @@ def align_interp_array_lr(
 
     if np.sum(interp[date] > 0) > 0 and np.sum(interp[date] == 0) > 0:
         if np.mean(np.logical_and(interp[date] < 1, water_mask <= 1)) > 0.01:
-            array_i = np.copy(array[date])
             interp_array_i = np.copy(interp_array[0])
 
             n_current_time = np.sum(np.logical_and(interp[date] == 0, water_mask <= 1))
