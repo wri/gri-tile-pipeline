@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from tests.constants import REPO_ROOT
 SCRIPT_PATH = REPO_ROOT / "scripts" / "merge_tof_output_policy.py"
 
 

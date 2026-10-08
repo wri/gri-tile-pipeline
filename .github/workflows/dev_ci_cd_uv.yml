@@ -63,12 +63,29 @@ jobs:
           done
           command -v gdalbuildvrt
 
-      # Step 5: Run tests
-      # The ard-file=exclude setting ensures that the tests which require ARD tiles are not executed.
-      - name: Run Tests
+      # Step 5: Guard against running with real credentials
+      - name: Check for secrets file
         run: |
           if [ -f "secrets.yaml" ]; then
             echo "Aborting tests to avoid unintended execution.."
             exit 1
           fi
-          uv run pytest tests/ --ard-file exclude
+
+      # Step 6: Unit tests
+      # Self-contained tests (external services mocked); includes the
+      # formula-level parity checks and the golden .npy snapshot tests.
+      # ard-file=exclude skips any test_golden_*/test_ard_* tests that need ARD tiles.
+      - name: Unit tests
+        run: uv run pytest tests/unit --ard-file exclude
+
+      # Step 7: CLI smoke test
+      # Runs every gri-ttc subcommand with --help in a fresh process to catch
+      # import errors and broken entry points. Needs no data or credentials.
+      #
+      # Deliberately NOT run in CI:
+      #   tests/integration (other files) - need AWS credentials, the deployed
+      #                                     Lambda, or local ARD data
+      #   tests/parity                     - need golden tiles, the model and TensorFlow
+      #   tests/performance                - timing thresholds are unreliable on shared runners
+      - name: CLI smoke test
+        run: uv run pytest tests/integration/test_cli_smoke.py --ard-file exclude

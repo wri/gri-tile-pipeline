@@ -1,5 +1,9 @@
 # Release notes for gri-tile-pipeline
 
+## 2026/10/08
+1. Restructured test to comply with the unit and integration folder structure as appropriate.
+2. Updated Github workflow to run smoke tests and unit tests
+
 ## 2026/09/16
 1. Added control to pyproject.toml file for whether tests of golden or ARD tile datasets are run.
 2. Updated conftest with the logic for handling this control.
