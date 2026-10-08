@@ -1,7 +1,7 @@
 """Numeric parity test: compare our prediction against the reference output.
 
 Usage:
-    python tests/test_predict_parity.py
+    python tests/parity/test_predict_parity.py
 
 Requires:
     - example/sample_ard/raw_v2/ (ARD input data for tile 1000X871Y)
@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 # Paths
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ARD_DIR = os.path.join(REPO_ROOT, "example", "sample_ard", "raw_v2")
 REFERENCE_TIF = os.path.join(REPO_ROOT, "example", "1000X871Y_FINAL.tif")
 MODEL_DIR = os.path.join(REPO_ROOT, "models")

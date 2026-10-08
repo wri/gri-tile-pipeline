@@ -2,11 +2,11 @@
 
 import os
 
-
 from gri_tile_pipeline.config import (
     PipelineConfig,
     load_config,
 )
+from tests.constants import REPO_ROOT
 
 
 def test_default_values():
@@ -70,9 +70,7 @@ def test_empty_yaml(tmp_path):
 
 def test_real_config_if_exists():
     """Load the real config.yaml if it exists in the repo root."""
-    real_config = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config.yaml"
-    )
+    real_config = os.path.join(REPO_ROOT, "config.yaml")
     if os.path.isfile(real_config):
         cfg = load_config(real_config)
         assert isinstance(cfg, PipelineConfig)
