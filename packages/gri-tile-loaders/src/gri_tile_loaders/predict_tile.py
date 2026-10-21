@@ -254,6 +254,65 @@ def _write_stac_sidecar_local(path: str, item: Dict[str, Any]) -> None:
         json.dump(item, f, indent=2, sort_keys=True)
 
 
+def _align_s1_to_grid(s1_use: np.ndarray, H: int, W: int) -> np.ndarray:
+    """Upsample ~40m S1 to the (H, W) 10m target grid, then pad/crop leftover slop.
+
+    *s1_use* is ``(T, h, w, C)``. Nearest-neighbor repeat at the integer
+    ratio first, then the reference adjust_shape / pad_crop_to_hw steps
+    absorb the remaining +/-px mismatch from reprojecting S1 and S2
+    independently.
+    """
+    h_s1, w_s1 = s1_use.shape[1], s1_use.shape[2]
+    if h_s1 > 0 and w_s1 > 0:
+        scale_h = round(H / h_s1)
+        scale_w = round(W / w_s1)
+        if scale_h > 1 or scale_w > 1:
+            s1_use = np.repeat(np.repeat(s1_use, scale_h, axis=1), scale_w, axis=2)
+    if s1_use.shape[1] != H or s1_use.shape[2] != W:
+        h_s1, w_s1 = s1_use.shape[1], s1_use.shape[2]
+        # Step 1: adjust_shape — edge-pad if too small, center-crop if too large
+        if h_s1 < H:
+            pad = (H - h_s1) // 2
+            if pad == 0:
+                s1_use = np.pad(s1_use, ((0, 0), (1, 0), (0, 0), (0, 0)), 'edge')
+            else:
+                s1_use = np.pad(s1_use, ((0, 0), (pad, pad), (0, 0), (0, 0)), 'edge')
+        elif h_s1 > H:
+            crop = (h_s1 - H) // 2
+            if crop == 0:
+                s1_use = s1_use[:, 1:, :, :]
+            else:
+                s1_use = s1_use[:, crop:-crop, :, :]
+        if w_s1 < W:
+            pad = (W - w_s1) // 2
+            if pad == 0:
+                s1_use = np.pad(s1_use, ((0, 0), (0, 0), (1, 0), (0, 0)), 'edge')
+            else:
+                s1_use = np.pad(s1_use, ((0, 0), (0, 0), (pad, pad), (0, 0)), 'edge')
+        elif w_s1 > W:
+            crop = (w_s1 - W) // 2
+            if crop == 0:
+                s1_use = s1_use[:, :, 1:, :]
+            else:
+                s1_use = s1_use[:, :, crop:-crop, :]
+        # Step 2: pad_crop_to_hw — center-aligned final alignment
+        ch, cw = s1_use.shape[1], s1_use.shape[2]
+        if ch != H or cw != W:
+            hs = max(0, (ch - H) // 2)
+            ws = max(0, (cw - W) // 2)
+            he = min(ch, hs + H)
+            we = min(cw, ws + W)
+            s1_use = s1_use[:, hs:he, ws:we, :]
+            ch2, cw2 = s1_use.shape[1], s1_use.shape[2]
+            pad_h, pad_w = max(0, H - ch2), max(0, W - cw2)
+            if pad_h > 0 or pad_w > 0:
+                ph1, ph2 = pad_h // 2, pad_h - pad_h // 2
+                pw1, pw2 = pad_w // 2, pad_w - pad_w // 2
+                s1_use = np.pad(s1_use, ((0, 0), (ph1, ph2), (pw1, pw2), (0, 0)),
+                                mode='constant', constant_values=0)
+    return s1_use
+
+
 def _fill_zeros_with_temporal_median(arr: np.ndarray) -> np.ndarray:
     """Replace zero values with non-zero temporal median (reference helper).
 
@@ -752,54 +811,7 @@ def predict_tile_from_arrays(
     # cross-source correlation on affected tiles to ~0.62; repeat-upsampling
     # first recovers ~0.93).
     s1_use = s1[:12].astype(np.float32) if s1.ndim == 4 else s1[:12, :, :, np.newaxis]
-    h_s1, w_s1 = s1_use.shape[1], s1_use.shape[2]
-    if h_s1 > 0 and w_s1 > 0:
-        scale_h = round(H / h_s1)
-        scale_w = round(W / w_s1)
-        if scale_h > 1 or scale_w > 1:
-            s1_use = np.repeat(np.repeat(s1_use, scale_h, axis=1), scale_w, axis=2)
-    if s1_use.shape[1] != H or s1_use.shape[2] != W:
-        h_s1, w_s1 = s1_use.shape[1], s1_use.shape[2]
-        # Step 1: adjust_shape — edge-pad if too small, center-crop if too large
-        if h_s1 < H:
-            pad = (H - h_s1) // 2
-            if pad == 0:
-                s1_use = np.pad(s1_use, ((0, 0), (1, 0), (0, 0), (0, 0)), 'edge')
-            else:
-                s1_use = np.pad(s1_use, ((0, 0), (pad, pad), (0, 0), (0, 0)), 'edge')
-        elif h_s1 > H:
-            crop = (h_s1 - H) // 2
-            if crop == 0:
-                s1_use = s1_use[:, 1:, :, :]
-            else:
-                s1_use = s1_use[:, crop:-crop, :, :]
-        if w_s1 < W:
-            pad = (W - w_s1) // 2
-            if pad == 0:
-                s1_use = np.pad(s1_use, ((0, 0), (0, 0), (1, 0), (0, 0)), 'edge')
-            else:
-                s1_use = np.pad(s1_use, ((0, 0), (0, 0), (pad, pad), (0, 0)), 'edge')
-        elif w_s1 > W:
-            crop = (W - w_s1) // 2
-            if crop == 0:
-                s1_use = s1_use[:, :, 1:, :]
-            else:
-                s1_use = s1_use[:, :, crop:-crop, :]
-        # Step 2: pad_crop_to_hw — center-aligned final alignment
-        ch, cw = s1_use.shape[1], s1_use.shape[2]
-        if ch != H or cw != W:
-            hs = max(0, (ch - H) // 2)
-            ws = max(0, (cw - W) // 2)
-            he = min(ch, hs + H)
-            we = min(cw, ws + W)
-            s1_use = s1_use[:, hs:he, ws:we, :]
-            ch2, cw2 = s1_use.shape[1], s1_use.shape[2]
-            pad_h, pad_w = max(0, H - ch2), max(0, W - cw2)
-            if pad_h > 0 or pad_w > 0:
-                ph1, ph2 = pad_h // 2, pad_h - pad_h // 2
-                pw1, pw2 = pad_w // 2, pad_w - pad_w // 2
-                s1_use = np.pad(s1_use, ((0, 0), (ph1, ph2), (pw1, pw2), (0, 0)),
-                                mode='constant', constant_values=0)
+    s1_use = _align_s1_to_grid(s1_use, H, W)
 
     # Fill zero S1 values with temporal median
     s1_use = _fill_zeros_with_temporal_median(s1_use)
