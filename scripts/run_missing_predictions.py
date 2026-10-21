@@ -22,10 +22,14 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import sys
 import time
 import traceback
+from typing import TYPE_CHECKING
+from collections import Counter
+
+if TYPE_CHECKING:
+    from obstore.store import S3Store
 
 # Add src/ and repo root to path for imports
 _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,7 +40,7 @@ from gri_tile_pipeline.storage.tile_paths import prediction_key, raw_ard_keys
 from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
 
 
-def _make_s3_store(bucket: str, region: str, profile: str | None = None):
+def _make_s3_store(bucket: str, region: str, profile: str | None = None) -> "S3Store":
     """Build an obstore S3Store with boto3 credential handling."""
     import boto3
     from obstore.auth.boto3 import Boto3CredentialProvider
@@ -47,7 +51,7 @@ def _make_s3_store(bucket: str, region: str, profile: str | None = None):
     return S3Store(bucket, region=region, credential_provider=credential_provider)
 
 
-def validate_aws(store) -> None:
+def validate_aws(store: "S3Store") -> None:
     """Verify AWS credentials work by issuing a head call."""
     import obstore as obs
 
@@ -67,15 +71,25 @@ def validate_aws(store) -> None:
 
 
 def download_ard_for_tile(
-    s3_store, output_dir: str, year: int, x_tile: int, y_tile: int, *, skip_existing: bool = False,
+    s3_store: "S3Store",
+    output_dir: str,
+    year: int,
+    x_tile: int,
+    y_tile: int,
+    *,
+    skip_existing: bool = False,
 ) -> list[str]:
-    """Download 6 ARD HKL files from S3 to local directory structure.
+    """Download ARD HKL files from S3 to local directory structure.
 
-    Returns list of downloaded S3 keys.
+    Returns the list of S3 keys actually downloaded this call (excludes
+    any keys skipped because a local copy already existed) — callers that
+    need to clean up only what THIS invocation fetched (see cleanup_ard)
+    depend on this list being exact, not the full expected key set.
     """
     import obstore as obs
 
     keys = raw_ard_keys(year, x_tile, y_tile)
+    downloaded: list[str] = []
     for key in keys:
         local_path = os.path.join(output_dir, key)
         if skip_existing and os.path.isfile(local_path):
@@ -85,7 +99,8 @@ def download_ard_for_tile(
         with open(local_path, "wb") as f:
             f.write(data)
         print(f"    downloaded {key} ({len(data) / 1024:.0f} KB)")
-    return keys
+        downloaded.append(key)
+    return downloaded
 
 
 def check_local_ard(output_dir: str, year: int, x_tile: int, y_tile: int) -> list[str]:
@@ -97,20 +112,78 @@ def check_local_ard(output_dir: str, year: int, x_tile: int, y_tile: int) -> lis
     return [k for k in keys if os.path.isfile(os.path.join(output_dir, k))]
 
 
-def cleanup_ard(output_dir: str, year: int, x_tile: int, y_tile: int) -> None:
-    """Remove downloaded ARD files for a tile."""
-    raw_dir = os.path.join(output_dir, str(year), "raw", str(x_tile), str(y_tile))
-    if os.path.isdir(raw_dir):
-        shutil.rmtree(raw_dir)
+def cleanup_ard(output_dir: str, downloaded_keys: list[str]) -> None:
+    """Remove only the ARD files this run downloaded.
+
+    Takes the exact keys returned by download_ard_for_tile rather than
+    deriving a directory from (year, x_tile, y_tile) and rmtree-ing it —
+    that previous approach deleted pre-existing local files (from a
+    prior --keep-ard run, or files placed there for other reasons) that
+    were never downloaded in this invocation. Prunes now-empty parent
+    directories after removing files, but leaves any directory that
+    still has content.
+    """
+    for key in downloaded_keys:
+        local_path = os.path.join(output_dir, key)
+        try:
+            os.remove(local_path)
+        except FileNotFoundError:
+            continue
+        try:
+            os.removedirs(os.path.dirname(local_path))
+        except OSError:
+            pass  # directory not empty (or already gone) — fine, leave it
 
 
-def main():
+def _validate_tiles(args: argparse.Namespace, tiles: list[dict]) -> None:
+    if not tiles:
+        print(f"No tiles found in '{args.csv}'")
+        sys.exit(1)
+
+    required = {
+        "year",
+        "lon",
+        "lat",
+        "X_tile",
+        "Y_tile",
+    }
+
+    for i, tile in enumerate(tiles, start=1):
+        missing = required - tile.keys()
+        if missing:
+            raise ValueError(
+                f"Tile {i} is missing required columns: "
+                f"{', '.join(sorted(missing))}"
+            )
+
+    tile_counts = Counter(
+        (t["year"], t["X_tile"], t["Y_tile"])
+        for t in tiles
+    )
+
+    duplicates = {
+        tile: count
+        for tile, count in tile_counts.items()
+        if count > 1
+    }
+
+    if duplicates:
+        print("Duplicate tiles found in input CSV:")
+        for (year, x_tile, y_tile), count in sorted(duplicates.items()):
+            print(
+                f"  year={year} tile={x_tile}X{y_tile}Y "
+                f"appears {count} times"
+            )
+        sys.exit(1)
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Download ARD from S3 and run local predictions for missing tiles."
     )
     parser.add_argument("csv", help="Path to tiles CSV (Year,X,Y,Y_tile,X_tile)")
     parser.add_argument(
-        "--bucket", default="tof-output", help="S3 bucket containing ARD (default: tof-output)"
+        "--bucket", default="wri-restoration-geodata-ttc", help="S3 bucket containing ARD (default: wri-restoration-geodata-ttc)"
     )
     parser.add_argument(
         "--region", default="us-east-1", help="S3 bucket region (default: us-east-1)"
@@ -133,9 +206,7 @@ def main():
     args = parser.parse_args()
 
     tiles = read_tiles_csv(args.csv)
-    if not tiles:
-        print(f"No tiles found in '{args.csv}'")
-        sys.exit(1)
+    _validate_tiles(args, tiles)
 
     # Summarise
     year_counts: dict[int, int] = {}
@@ -156,13 +227,13 @@ def main():
             pred_key = prediction_key(t["year"], t["X_tile"], t["Y_tile"])
             local_tif = os.path.join(args.output_dir, pred_key)
             print(f"[{i}/{len(tiles)}] {tag} year={t['year']}")
-            print(f"  ARD keys to download:")
+            print("  ARD keys to download:")
             for key in raw_ard_keys(t["year"], t["X_tile"], t["Y_tile"]):
                 print(f"    s3://{args.bucket}/{key}")
             print(f"  Output: {local_tif}")
             print(f"  Upload: aws s3 cp {local_tif} s3://{args.bucket}/{pred_key}")
             print()
-        return
+        return 0
 
     # Validate model path
     graph_file = os.path.join(args.model_path, "predict_graph-172.pb")
@@ -180,7 +251,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Lazy import — predict_tile pulls in TensorFlow which is slow
-    from loaders.predict_tile import run as predict_run
+    from gri_tile_loaders.predict_tile import run as predict_run
 
     successes: list[dict] = []
     failures: list[dict] = []
@@ -189,6 +260,7 @@ def main():
         tag = f"{t['X_tile']}X{t['Y_tile']}Y"
         print(f"[{i}/{len(tiles)}] {tag} year={t['year']}")
         t0 = time.time()
+        downloaded_this_run: list[str] = []
 
         try:
             # Check for locally available ARD
@@ -200,10 +272,12 @@ def main():
             elif local_keys:
                 missing_keys = set(all_keys) - set(local_keys)
                 print(f"  {len(local_keys)}/{len(all_keys)} ARD files present locally, downloading {len(missing_keys)} remaining ...")
-                download_ard_for_tile(store, args.output_dir, t["year"], t["X_tile"], t["Y_tile"], skip_existing=True)
+                downloaded_this_run = download_ard_for_tile(
+                    store, args.output_dir, t["year"], t["X_tile"], t["Y_tile"], skip_existing=True
+                )
             else:
                 print("  Downloading ARD ...")
-                download_ard_for_tile(store, args.output_dir, t["year"], t["X_tile"], t["Y_tile"])
+                downloaded_this_run = download_ard_for_tile(store, args.output_dir, t["year"], t["X_tile"], t["Y_tile"])
 
             # Run prediction
             print("  Running inference ...")
@@ -235,8 +309,10 @@ def main():
             failures.append({**t, "error": str(e)})
 
         finally:
-            if not args.keep_ard:
-                cleanup_ard(args.output_dir, t["year"], t["X_tile"], t["Y_tile"])
+            # Only remove what THIS run downloaded — never touch ARD that
+            # was already present locally before this invocation started.
+            if not args.keep_ard and downloaded_this_run:
+                cleanup_ard(args.output_dir, downloaded_this_run)
 
         print()
 
@@ -260,7 +336,6 @@ def main():
 
         # Also print a single combined command if multiple tiles
         if len(successes) > 1:
-            tiles_dir = os.path.join(args.output_dir)
             print("Or sync the entire output directory:")
             # Find common year prefix
             years = sorted(set(s["year"] for s in successes))
@@ -269,6 +344,7 @@ def main():
                 print(f"aws s3 sync {local_tiles} s3://{args.bucket}/{year}/tiles/")
             print()
 
+    return 1 if failures else 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

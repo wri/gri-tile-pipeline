@@ -9,14 +9,14 @@ from __future__ import annotations
 from typing import Any
 
 
-TILE_DEG = 1.0 / 18.0  # Tile grid spacing in degrees (EPSG:4326).
+TILE_DEG: float = 1.0 / 18.0  # Tile grid spacing in degrees (EPSG:4326).
 
-STAC_VERSION = "1.0.0"
-STAC_COLLECTION = "gri-tree-cover-predictions"
-STAC_PROJECTION_EXTENSION = (
+STAC_VERSION: str = "1.0.0"
+STAC_COLLECTION: str = "gri-tree-cover-predictions"
+STAC_PROJECTION_EXTENSION: str = (
     "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
 )
-COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
+COG_MEDIA_TYPE: str = "image/tiff; application=geotiff; profile=cloud-optimized"
 
 
 def tile_bbox(

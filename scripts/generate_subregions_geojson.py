@@ -12,12 +12,13 @@ import geopandas as gpd
 import pandas as pd
 from pathlib import Path
 import os
+import sys
 import tempfile
 import urllib.request
 import zipfile
 
 
-def main():
+def main() -> None:
     data_dir = Path(__file__).parent.parent / "src" / "gri_tile_pipeline" / "zonal" / "data"
     region_conf = pd.read_csv(data_dir / "region_conf.csv")
 
@@ -52,6 +53,21 @@ def main():
         geometry="geometry",
         crs=world.crs,
     )
+
+    # region_conf.csv categories that never matched a Natural Earth SUBREGION
+    # name are silently dropped by the isin()/merge() steps above — a typo or
+    # a Natural Earth naming change (e.g. a renamed subregion) would otherwise
+    # produce a geojson missing an entire category with no error and no
+    # visible symptom until someone notices a region is missing downstream.
+    matched_subregions = set(result["category"])
+    missing = target_subregions - matched_subregions
+    if missing:
+        print(
+            f"WARNING: {len(missing)} categor{'y' if len(missing) == 1 else 'ies'} from "
+            f"region_conf.csv did not match any Natural Earth SUBREGION and were dropped: "
+            f"{sorted(missing)}",
+            file=sys.stderr,
+        )
 
     output_path = data_dir / "subregions_conf.geojson"
     result.to_file(output_path, driver="GeoJSON")

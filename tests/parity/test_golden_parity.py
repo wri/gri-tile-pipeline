@@ -8,14 +8,13 @@ Usage:
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from tests.conftest import GOLDEN_DIR, GOLDEN_RAW, GOLDEN_TILES, MODEL_DIR
+from tests.constants import GOLDEN_DIR, GOLDEN_RAW, GOLDEN_TILES, MODEL_DIR
 from tests.parity.metrics import (
     aggregate_golden_report,
     compare_predictions,
@@ -24,8 +23,8 @@ from tests.parity.metrics import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Ensure loaders/ is importable
-_loader_path = str(REPO_ROOT / "loaders")
+# Ensure gri_tile_loaders/ is importable
+_loader_path = str(REPO_ROOT / "gri_tile_loaders")
 if _loader_path not in sys.path:
     sys.path.insert(0, _loader_path)
 
@@ -101,7 +100,7 @@ _stats_cache: dict[str, dict] = {}
 def _get_prediction(tile_name: str) -> np.ndarray:
     """Get (or compute and cache) prediction for a golden tile."""
     if tile_name not in _prediction_cache:
-        from loaders.predict_tile import predict_tile_from_arrays
+        from gri_tile_loaders.predict_tile import predict_tile_from_arrays
 
         print(f"\n  Computing prediction for {tile_name}...")
         arrays = load_golden_tile(tile_name)
@@ -134,6 +133,7 @@ def _get_stats(tile_name: str) -> dict:
 
 
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_golden_baseline(tile_name):
     """Tier 1: baseline gates that must not regress."""
     stats = _get_stats(tile_name)
@@ -160,7 +160,7 @@ def test_golden_baseline(tile_name):
 
 
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
-@pytest.mark.xfail(reason="Cloud removal not yet fully ported", strict=False)
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_golden_improved(tile_name):
     """Tier 2: target after cloud removal improvements."""
     stats = _get_stats(tile_name)
@@ -184,7 +184,7 @@ def test_golden_improved(tile_name):
 
 
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
-@pytest.mark.xfail(reason="Production parity not yet achieved", strict=False)
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_golden_target(tile_name):
     """Tier 3: production quality target."""
     stats = _get_stats(tile_name)
@@ -207,7 +207,7 @@ def test_golden_target(tile_name):
 # Aggregate report (runs after all tile tests)
 # ---------------------------------------------------------------------------
 
-
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_golden_aggregate_report():
     """Print aggregate parity report across all golden tiles."""
     # Ensure all tiles have been computed

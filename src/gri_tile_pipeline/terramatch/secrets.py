@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal
 
 import yaml
 
@@ -15,15 +15,15 @@ from gri_tile_pipeline.terramatch.client import (
 
 Env = Literal["staging", "production"]
 
-TOKEN_ENV_VAR = "GRI_TM_TOKEN"
-DEFAULT_SECRETS_PATH = "secrets.yaml"
+TOKEN_ENV_VAR: str = "GRI_TM_TOKEN"
+DEFAULT_SECRETS_PATH: str = "secrets.yaml"
 
 
 class MissingTMCredential(RuntimeError):
     """Raised when a required TerraMatch credential can't be resolved."""
 
 
-def load_secrets(path: str | Path = DEFAULT_SECRETS_PATH) -> dict:
+def load_secrets(path: str | Path = DEFAULT_SECRETS_PATH) -> dict[str, Any]:
     p = Path(path)
     if not p.exists():
         return {}
@@ -34,8 +34,8 @@ def load_secrets(path: str | Path = DEFAULT_SECRETS_PATH) -> dict:
 def resolve_tm_creds(
     env: Env,
     *,
-    token: Optional[str] = None,
-    base_url: Optional[str] = None,
+    token: str | None = None,
+    base_url: str | None = None,
     secrets_path: str | Path = DEFAULT_SECRETS_PATH,
 ) -> tuple[str, str]:
     """Return ``(base_url, token)`` for the requested environment.

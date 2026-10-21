@@ -4,7 +4,6 @@ import json
 from io import StringIO
 
 import click
-import pytest
 from click.testing import CliRunner
 
 from gri_tile_pipeline.cli_context import (

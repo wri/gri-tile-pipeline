@@ -63,7 +63,7 @@ def reduce_to_2d_preserve_spatial(arr: np.ndarray, spatial_axes: list[int]) -> n
     return trans
 
 
-def plot_panels(panels: list[np.ndarray], titles: list[str], cmap: str, percentile: float):
+def plot_panels(panels: list[np.ndarray], titles: list[str], cmap: str, percentile: float) -> None:
     n = len(panels)
     cols = min(4, n)
     rows = math.ceil(n / cols)
@@ -84,7 +84,7 @@ def plot_panels(panels: list[np.ndarray], titles: list[str], cmap: str, percenti
     plt.show()
 
 
-def plot_histograms(panels: list[np.ndarray], titles: list[str], bins: int = 50):
+def plot_histograms(panels: list[np.ndarray], titles: list[str], bins: int = 50) -> None:
     n = len(panels)
     cols = min(4, n)
     rows = math.ceil(n / cols)
@@ -173,7 +173,7 @@ def load_npy_panels_from_array(arr: np.ndarray, dim: int, max_panels: int) -> tu
     else:
         indices = np.linspace(0, slices - 1, num=max_panels, dtype=int).tolist()
     for i in indices:
-        slicer = [slice(None)] * arr.ndim
+        slicer: list[slice | int] = [slice(None)] * arr.ndim
         slicer[dim] = i
         sliced = arr[tuple(slicer)]
         img2 = reduce_to_2d_preserve_spatial(sliced, spatial_axes=[ax - (1 if ax > dim else 0) for ax in spatial_axes if ax != dim])

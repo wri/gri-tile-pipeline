@@ -6,13 +6,13 @@ downloads ARD, runs inference (via Lithops/Lambda by default; pass --local
 for in-process), and computes zonal TTC statistics.
 
 Usage:
-    uv run python scripts/run_project_e2e.py GHA_22_INEC --dest s3://tof-output
-    uv run python scripts/run_project_e2e.py --input request.csv --dest s3://tof-output
+    uv run python scripts/run_project_e2e.py GHA_22_INEC --dest s3://wri-restoration-geodata-ttc
+    uv run python scripts/run_project_e2e.py --input request.csv --dest s3://wri-restoration-geodata-ttc
     uv run python scripts/run_project_e2e.py GHA_22_INEC --dest ./local_tiles --dry-run
 
 Equivalent CLI commands:
-    gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes
-    gri-ttc run-project --input request.csv --dest s3://tof-output --yes
+    gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes
+    gri-ttc run-project --input request.csv --dest s3://wri-restoration-geodata-ttc --yes
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from gri_tile_pipeline.config import load_config
 from gri_tile_pipeline.steps.project_e2e import run_project_pipeline
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="End-to-end TTC pipeline for a TerraMatch project",
     )

@@ -59,7 +59,7 @@ def extract_polygon(short_name: str, geoparquet: str = GEOPARQUET) -> tuple[Path
     return out, year
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Run zonal stats for a single project from tm.geoparquet")
     parser.add_argument("short_name", help="Project short_name (e.g. GHA_22_INEC)")
     parser.add_argument("--year", type=int, default=None, help="Override prediction year")

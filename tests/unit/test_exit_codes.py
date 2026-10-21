@@ -1,6 +1,5 @@
 """Unit tests for exit_codes.py."""
 
-import pytest
 
 from gri_tile_pipeline.exit_codes import ExitCode, exit_code_from_tracker
 from gri_tile_pipeline.tracking.job_result import JobResult

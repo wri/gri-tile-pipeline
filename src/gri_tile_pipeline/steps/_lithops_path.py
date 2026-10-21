@@ -2,7 +2,7 @@
 
 Lithops uses ``imp.find_module()`` to locate ``include_modules`` entries.
 When running via the installed CLI (``gri-ttc``), only ``src/`` is on
-sys.path — the repo root (where ``loaders/`` and ``lithops_workers.py``
+sys.path — the repo root (where ``gri_tile_loaders/`` and ``lithops_workers.py``
 live) is not.  Importing this module adds it.
 """
 from __future__ import annotations

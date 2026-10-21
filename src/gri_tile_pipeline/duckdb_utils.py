@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def connect_with_spatial():
+if TYPE_CHECKING:
+    import duckdb
+
+
+def connect_with_spatial() -> "duckdb.DuckDBPyConnection":
     """Return a DuckDB connection with the spatial extension loaded."""
     import duckdb
 

@@ -8,7 +8,7 @@ poly_uuids, then classifies the geometry issue for each.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -123,7 +123,10 @@ def audit_drops(request_csv: str, stats_csv: str, geoparquet: str) -> DropReport
             "detail": detail,
         })
 
-    status_counts = pd.Series([r["status"] for r in rows]).value_counts().to_dict() if rows else {}
+    status_counts = cast(
+        "dict[str, int]",
+        pd.Series([r["status"] for r in rows]).value_counts().to_dict() if rows else {},
+    )
 
     return DropReport(
         n_expected=len(expected),

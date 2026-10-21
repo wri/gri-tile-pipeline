@@ -12,28 +12,28 @@ from typing import Any, Dict
 
 
 def run_dem(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    from loaders.download_dem import run
+    from gri_tile_loaders.download_dem import run
     return run(**kwargs)
 
 
 def run_s1_rtc(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """S1 RTC from Planetary Computer (default)."""
     time.sleep(random.uniform(0.0, 2.0))
-    from loaders.download_s1_rtc import run
+    from gri_tile_loaders.download_s1_rtc import run
     return run(**kwargs)
 
 
 def run_s1_legacy(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """S1 GRD from AWS Earth Search (legacy)."""
-    from loaders.download_s1 import run
+    from gri_tile_loaders.download_s1 import run
     return run(**kwargs)
 
 
 def run_s2(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    from loaders.download_s2 import run
+    from gri_tile_loaders.download_s2 import run
     return run(**kwargs)
 
 
 def run_predict(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    from loaders.predict_tile import run
+    from gri_tile_loaders.predict_tile import run
     return run(**kwargs)

@@ -5,11 +5,13 @@ Ported from reference ``tree_cover_indicator.py``.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 import numpy as np
-import pandas as pd
 from loguru import logger
+
+if TYPE_CHECKING:
+    import geopandas as gpd
 
 
 def compute_ttc(
@@ -45,7 +47,13 @@ def compute_ttc(
     if polygons_gdf is not None:
         gdf = polygons_gdf.copy()
     else:
-        gdf = gpd.read_file(polygons_path)
+        # Options instruct GDAL to parse the geometry column
+        gdf = gpd.read_file(
+            polygons_path,
+            GEOM_POSSIBLE_NAMES="geometry",
+            KEEP_GEOM_COLUMNS="NO",
+        )
+        gdf = gpd.GeoDataFrame(gdf, geometry="geometry", crs="EPSG:4326")
 
     # Fix invalid (self-intersecting) geometries, keeping them as single
     # Polygons. buffer(0) resolves self-intersections; if that produces a
@@ -127,8 +135,20 @@ def compute_ttc(
         src_row = match.iloc[0]
 
         if ttc is None or (isinstance(ttc, float) and np.isnan(ttc)):
-            logger.warning(f"NaN TTC for polygon {pid}, flagging with 200")
-            ttc = 200.0
+            # No valid prediction coverage under this polygon (zero raster
+            # overlap, all-nodata, or coverage < min_coverage_frac). Skip
+            # it rather than emitting an in-band sentinel: the previous
+            # `ttc = 200.0` flag is indistinguishable from a real value in
+            # the 0-100 TTC field and propagated downstream
+            # (polygon_indicators -> Indicator Review -> TerraMatch patch).
+            # Dropping the row leaves the polygon without a tree_cover
+            # value, so it stays eligible and is retried on a later run
+            # instead of recording a fake 200% cover.
+            logger.warning(
+                f"NaN TTC for polygon {pid} (no valid prediction "
+                f"coverage) — skipping; polygon stays uncomputed"
+            )
+            continue
 
         row_data = {
             "poly_uuid": pid,

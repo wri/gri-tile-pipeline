@@ -5,15 +5,18 @@ from __future__ import annotations
 import json
 import re
 import sys
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any
 
 import duckdb
 import pandas as pd
 
-TILE_RE = re.compile(r"^\s*(?P<x>\-?\d+)X(?P<y>\-?\d+)Y\s*$")
+if TYPE_CHECKING:
+    import geopandas as gpd
+
+TILE_RE: re.Pattern = re.compile(r"^\s*(?P<x>\-?\d+)X(?P<y>\-?\d+)Y\s*$")
 
 
-def decode_tile(token: str) -> Optional[Tuple[int, int]]:
+def decode_tile(token: str) -> tuple[int, int] | None:
     """Parse ``'1035X727Y'`` into ``(1035, 727)``."""
     m = TILE_RE.match(token)
     if m is None:
@@ -21,9 +24,9 @@ def decode_tile(token: str) -> Optional[Tuple[int, int]]:
     return int(m.group("x")), int(m.group("y"))
 
 
-def load_missing_tiles_with_years(obj: Dict[str, Any]) -> List[Tuple[int, str]]:
+def load_missing_tiles_with_years(obj: dict[str, Any]) -> list[tuple[int, str]]:
     """Extract ``(year, tile_str)`` pairs from the inbound JSON structure."""
-    pairs: Set[Tuple[int, str]] = set()
+    pairs: set[tuple[int, str]] = set()
     for _project_uuid, years in obj.items():
         if not isinstance(years, dict):
             continue
@@ -45,11 +48,11 @@ def load_missing_tiles_with_years(obj: Dict[str, Any]) -> List[Tuple[int, str]]:
 
 
 def tiles_years_to_dataframe(
-    pairs: List[Tuple[int, str]],
+    pairs: list[tuple[int, str]],
 ) -> pd.DataFrame:
     """Convert ``(year, tile_str)`` pairs to a DataFrame with ``Year, X_tile, Y_tile``."""
-    rows: List[Tuple[int, int, int]] = []
-    bad: List[Tuple[int, str]] = []
+    rows: list[tuple[int, int, int]] = []
+    bad: list[tuple[int, str]] = []
     for year, token in pairs:
         parsed = decode_tile(token)
         if parsed is None:
@@ -75,7 +78,7 @@ def resolve_tiles(
     parquet_path: str,
     x_col: str = "X_tile",
     y_col: str = "Y_tile",
-    limit: Optional[int] = None,
+    limit: int | None = None,
 ) -> pd.DataFrame:
     """Load a JSON request, resolve tile coordinates via DuckDB parquet join.
 
@@ -110,10 +113,10 @@ def resolve_tiles(
 
 
 def identify_tiles_for_polygons(
-    gdf,
+    gdf: "gpd.GeoDataFrame",
     lookup_parquet: str = "data/tiledb.parquet",
     lookup_csv: str = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Spatial-join polygons against the tile grid to find required tiles.
 
     Each polygon in *gdf* must have a ``pred_year`` column indicating
@@ -126,8 +129,8 @@ def identify_tiles_for_polygons(
 
     lookup = load_tile_lookup(parquet_path=lookup_parquet, lookup_csv=lookup_csv or None)
 
-    seen: Set[Tuple[int, int, int]] = set()
-    tiles: List[Dict[str, Any]] = []
+    seen: set[tuple[int, int, int]] = set()
+    tiles: list[dict[str, Any]] = []
     for _, row in gdf.iterrows():
         year = int(row["pred_year"])
         pf = pre_filter_tiles(row.geometry, lookup)

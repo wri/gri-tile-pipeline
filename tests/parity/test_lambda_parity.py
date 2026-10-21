@@ -13,7 +13,7 @@ compares the output to:
      drift that reference-only comparison would miss).
 
 Skipped unless ``PARITY_LAMBDA=1`` is set. Both tests require:
-  - ARD for the 3 golden tiles uploaded to ``--dest`` (default ``s3://tof-output``)
+  - ARD for the 3 golden tiles uploaded to ``--dest`` (default ``s3://wri-restoration-geodata-ttc``)
   - ``.lithops/land-research/config.predict.yaml`` rendered (see docs/setup.md)
   - ``AWS_PROFILE=resto-user`` (or another profile with access to the bucket)
 
@@ -34,14 +34,14 @@ import numpy as np
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-# REPO_ROOT itself so `import loaders.predict_tile` works as a package
-# (needed for Lithops include_modules=["loaders"]).
-# REPO_ROOT/loaders so `import predict_tile` works directly (used by _local_inference).
-for p in (str(REPO_ROOT), str(REPO_ROOT / "loaders")):
+# REPO_ROOT itself so `import gri_tile_loaders.predict_tile` works as a package
+# (needed for Lithops include_modules=["gri_tile_loaders"]).
+# REPO_ROOT/gri_tile_loaders so `import predict_tile` works directly (used by _local_inference).
+for p in (str(REPO_ROOT), str(REPO_ROOT / "gri_tile_loaders")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from tests.conftest import GOLDEN_DIR, GOLDEN_TILES, MODEL_DIR
+from tests.constants import GOLDEN_DIR, MODEL_DIR
 from tests.parity.metrics import aggregate_golden_report, compare_predictions
 
 
@@ -93,7 +93,7 @@ def _env() -> str:
 
 
 def _dest() -> str:
-    return os.environ.get("PARITY_DEST", "s3://tof-output")
+    return os.environ.get("PARITY_DEST", "s3://wri-restoration-geodata-ttc")
 
 
 def _lithops_config_path() -> Path:
@@ -143,7 +143,6 @@ def _download_prediction(dest: str, year: int, x_tile: int, y_tile: int) -> np.n
 def _invoke_lambda_for_tiles(year: int, dest: str) -> dict[str, np.ndarray]:
     """Map the 3 golden tiles through the deployed predict Lambda."""
     import yaml
-    import lithops
     from lithops import FunctionExecutor
 
     # Mirror the import path used by scripts/predict_lambda_smoke.py so Lithops
@@ -175,7 +174,7 @@ def _invoke_lambda_for_tiles(year: int, dest: str) -> dict[str, np.ndarray]:
     futures = [
         fexec.call_async(
             lithops_workers.run_predict, (kw,),
-            include_modules=["loaders", "lithops_workers"],
+            include_modules=["gri_tile_loaders", "lithops_workers"],
         )
         for kw in kwargs_list
     ]
@@ -193,7 +192,7 @@ def _invoke_lambda_for_tiles(year: int, dest: str) -> dict[str, np.ndarray]:
 def _local_inference(tile_name: str) -> np.ndarray:
     """Run the local Python inference path — mirrors test_golden_parity helpers."""
     import hickle as hkl
-    from tests.conftest import GOLDEN_RAW
+    from tests.constants import GOLDEN_RAW
 
     from predict_tile import predict_tile_from_arrays  # type: ignore[import-not-found]
 
