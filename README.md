@@ -148,7 +148,16 @@ architecture is in [docs/system_overview.md](docs/system_overview.md).
 ```bash
 uv run pytest tests/unit/                                     # fast unit tests
 uv run pytest tests/parity/test_golden_parity.py -v -s        # inference parity
+uv run pytest tests/integration/                              # needs AWS_PROFILE
 ```
+
+| Folder | What lives there |
+|---|---|
+| `tests/unit/` | Fast, isolated tests; external services mocked. Subfolders mirror `src/gri_tile_pipeline/` (plus `loaders/` for `gri_tile_loaders`). Includes formula-level parity checks (`-m parity`) and snapshot tests against `unit/golden/*.npy` |
+| `tests/integration/` | Tests that need something outside the code: AWS/S3, the deployed Lambda, local example data, or the installed `gri-ttc` CLI (`local_*.py` are manual scripts, not collected) |
+| `tests/parity/` | Tile-level prediction parity and diagnostics vs. reference TIFs (needs golden data, model, TensorFlow) plus shared parity helpers |
+| `tests/performance/` | Timing benchmarks (`slow`) |
+| `tests/tools/` | Standalone diff/compare helper scripts (not tests) |
 
 ---
 

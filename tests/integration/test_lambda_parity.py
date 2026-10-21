@@ -20,7 +20,7 @@ Skipped unless ``PARITY_LAMBDA=1`` is set. Both tests require:
 Usage::
 
     PARITY_LAMBDA=1 AWS_PROFILE=resto-user LITHOPS_ENV=land-research \\
-        uv run pytest tests/parity/test_lambda_parity.py -v -s
+        uv run pytest tests/integration/test_lambda_parity.py -v -s
 """
 
 from __future__ import annotations

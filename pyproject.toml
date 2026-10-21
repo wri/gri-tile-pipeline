@@ -93,7 +93,7 @@ gri-shared-library = { git = "https://github.com/wri/gri-shared-library.git", br
 "scripts/predict_lambda_benchmark.py" = ["E402"]
 "src/gri_tile_pipeline/steps/predict.py" = ["E402"]
 "tests/parity/generate_report.py" = ["E402"]
-"tests/parity/test_lambda_parity.py" = ["E402"]
+"tests/integration/test_lambda_parity.py" = ["E402"]
 
 [tool.pytest.ini_options]
 ard_file_tests = "exclude"       # exclude | include | only  (Default is exclude. GH workflow always specifies exclude.)

@@ -11,10 +11,13 @@ GEOPARQUET = TERRAMATCH_GEOPARQUET_FILEPATH
 tiledb_file = TTC_TILEDB_FILEPATH
 config_file = os.path.join(REPO_ROOT, "config.yaml")
 
-pytestmark = pytest.mark.skipif(
-    not os.getenv("AWS_PROFILE"),
-    reason="requires AWS_PROFILE secret",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not os.getenv("AWS_PROFILE"),
+        reason="requires AWS_PROFILE secret",
+    ),
+]
 def test_tiles_missing_with_baseline():
     outermost_project_phase_name = "BASELINE"
     project_short_name = 'TEST_01_GRI'

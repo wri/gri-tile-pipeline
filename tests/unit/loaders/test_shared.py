@@ -1,13 +1,7 @@
-"""Unit tests for gri_tile_loaders/shared.py."""
-
-import sys
-import os
+"""Unit tests for gri_tile_loaders.shared (installed from packages/gri-tile-loaders)."""
 
 import numpy as np
 import pytest
-
-# Add gri_tile_loaders to path so we can import shared directly
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "gri_tile_loaders"))
 
 from gri_tile_loaders.shared import compute_band_stats, make_bbox
 
