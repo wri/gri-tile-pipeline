@@ -24,7 +24,7 @@ def summarize_array(arr: np.ndarray, axis: int) -> None:
     print(f"Summarizing along axis {axis} with {num_slices} slices")
 
     for idx in range(num_slices):
-        slicer = [slice(None)] * arr.ndim
+        slicer: list[slice | int] = [slice(None)] * arr.ndim
         slicer[axis] = idx
         data = arr[tuple(slicer)].astype(np.float64)
         data = data[np.isfinite(data)]

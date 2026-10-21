@@ -173,8 +173,10 @@ def _submit_and_time(
             "submit_s": round(t_sub - batch_start, 3),
             "complete_s": round(t_done_rel or 0.0, 3),
             "wallclock_s": round((t_done_rel or 0.0) - (t_sub - batch_start), 3),
-            "lambda_duration_s": round(lambda_duration, 3) if lambda_duration else "",
-            "worker_wallclock_s": round(worker_wallclock, 3) if worker_wallclock else "",
+            # `is not None` rather than truthiness — a genuine 0.0 duration
+            # (unlikely but not impossible) must still print as 0.0, not "".
+            "lambda_duration_s": round(lambda_duration, 3) if lambda_duration is not None else "",
+            "worker_wallclock_s": round(worker_wallclock, 3) if worker_wallclock is not None else "",
             "phase_timings": phase_timings,
             "error": err,
         })
@@ -194,9 +196,13 @@ def _summarize(rows: list[dict], lambda_region: str, max_workers: int, memory_mb
     # cold. This is an approximation — Lithops/Lambda don't surface cold-start
     # status reliably, but the first few wallclocks being much larger than the
     # trailing ones is a strong signal.
-    n_cold_estimate = min(max_workers, len(rows))
-    first_batch = sorted(wall)[:n_cold_estimate]
-    warm_batch = sorted(wall)[n_cold_estimate:]
+    #
+    # Heuristic: treat the first invocation submitted to each concurrent worker as
+    # a potential cold start. Preserve submission order; do not sort by latency —
+    # sorting here previously inverted the cold/warm labels (see git history).
+    n_cold_estimate = min(max_workers, len(ok))
+    first_batch = wall[:n_cold_estimate]
+    warm_batch = wall[n_cold_estimate:]
 
     total_elapsed = max(r["complete_s"] for r in ok)
     throughput = len(ok) / (total_elapsed / 60) if total_elapsed else 0.0

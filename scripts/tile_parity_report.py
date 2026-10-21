@@ -37,7 +37,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from obstore.store import ObjectStore
@@ -227,7 +227,7 @@ def _load_existing_prediction(store: "ObjectStore", year: int, x: int, y: int) -
         return src.read(1)
 
 
-def _run_local_predict(ard: dict[str, np.ndarray], model_dir: Path, seed: int) -> dict[str, object]:
+def _run_local_predict(ard: dict[str, np.ndarray], model_dir: Path, seed: int) -> dict[str, Any]:
     """Run predict_tile_from_arrays locally. Returns {pred, execution} where
     ``execution`` is a mode-tagged dict consumed by the report builder."""
     from gri_tile_loaders.predict_tile import predict_tile_from_arrays

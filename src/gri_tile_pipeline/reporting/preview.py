@@ -96,12 +96,12 @@ def render_preview(
     band[band == 255] = np.nan
 
     h, w = band.shape
-    extent = [
+    extent = (
         transform.c,
         transform.c + transform.a * w,
         transform.f + transform.e * h,
         transform.f,
-    ]
+    )
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
     im = ax.imshow(

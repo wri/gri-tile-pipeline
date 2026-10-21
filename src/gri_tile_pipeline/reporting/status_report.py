@@ -528,7 +528,7 @@ def generate_report(
         coverage = check_ttc_coverage(con, geoparquet, where, params)
         result.coverage = coverage
 
-        tile_avail = None
+        tile_avail: dict[str, Any] | None = None
         tiles_csv_path = None
 
         if skip_s3:

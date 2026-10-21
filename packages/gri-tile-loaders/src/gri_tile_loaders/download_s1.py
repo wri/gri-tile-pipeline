@@ -19,6 +19,7 @@ Enhanced version with:
 import os
 import sys
 import argparse
+from typing import Literal
 
 from affine import Affine
 from rasterio.session import AWSSession
@@ -1799,7 +1800,7 @@ def _main_impl(args: argparse.Namespace) -> None:
 
             # Pad spatial dimensions using reflect (fallback to edge if too small)
             if pad_h > 0 or pad_w > 0:
-                spatial_mode = 'reflect' if (arr.shape[1] > 1 and arr.shape[2] > 1) else 'edge'
+                spatial_mode: Literal['reflect', 'edge'] = 'reflect' if (arr.shape[1] > 1 and arr.shape[2] > 1) else 'edge'
                 arr = np.pad(arr, ((0, 0), (0, pad_h), (0, pad_w)), mode=spatial_mode)
 
             return arr

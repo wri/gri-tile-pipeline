@@ -19,7 +19,7 @@ def _invoke_worker(
     tracker: JobTracker,
 ) -> dict[str, Any]:
     """Call *worker_fn* with *kwargs* and record the result in *tracker*."""
-    tile_info = {
+    tile_info: dict[str, Any] = {
         k: kwargs[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile") if k in kwargs
     }
     tile_key = f"{tile_info.get('X_tile')}X{tile_info.get('Y_tile')}Y"
