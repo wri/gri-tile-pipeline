@@ -23,7 +23,8 @@ locals {
   # creates. Resource-level `tags = var.tags` blocks still work and merge
   # with these; explicit tags win on key collision.
   default_aws_tags = {
-    "wri:project" = "gri-ttc-tile-generator"
+    "wri:project" = "gri-tile-pipeline"
+    "wri:program" = "Restoration"
     "ManagedBy"   = "terraform"
   }
 }

@@ -14,8 +14,11 @@ aws_lambda:
   max_workers: 30
   runtime_memory: 4096
   user_tags:
-    name: "wri:project"
-    value: "GRI-ttc"
+    "Name": "gri-tile-pipeline-s1"
+    "Project": "gri-tile-pipeline"
+    "wri:project": "gri-tile-pipeline"
+    "wri:program": "Restoration"
+    "ManagedBy": "lithops"
   # Pin user_id so build host identity is irrelevant (last-4 lowercased
   # chars form the ECR repo suffix). See feedback_lithops_user_key.md.
   user_id: wri-ttc-shared-o56c
