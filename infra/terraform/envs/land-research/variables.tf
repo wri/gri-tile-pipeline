@@ -23,7 +23,9 @@ variable "tags" {
   description = "Tags applied to everything this stack creates."
   type        = map(string)
   default = {
-    Project   = "gri-tile-pipeline"
-    ManagedBy = "terraform"
+    "Project"       = "gri-tile-pipeline"
+    "wri:project"   = "gri-tile-pipeline"
+    "wri:program"   = "Restoration"
+    "ManagedBy"     = "terraform"
   }
 }

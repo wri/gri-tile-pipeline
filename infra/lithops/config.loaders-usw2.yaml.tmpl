@@ -12,6 +12,12 @@ aws_lambda:
   architecture: x86_64
   namespace: ttc-dev
   max_workers: 300
+  user_tags:
+    "Name": "gri-tile-pipeline-loaders-usw2"
+    "Project": "gri-tile-pipeline"
+    "wri:project": "gri-tile-pipeline"
+    "wri:program": "Restoration"
+    "ManagedBy": "lithops"
 
 aws_s3:
   region: us-west-2
