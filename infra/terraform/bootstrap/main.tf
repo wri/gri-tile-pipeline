@@ -12,7 +12,8 @@ provider "aws" {
   region = var.region
   default_tags {
     tags = {
-      "wri:project" = "gri-ttc-tile-generator"
+      "wri:project" = "gri-tile-pipeline"
+      "wri:program" = "Restoration"
       "ManagedBy"   = "terraform"
     }
   }
