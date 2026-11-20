@@ -62,9 +62,9 @@ A safe pattern end-to-end:
 ### 1. Compute stats (produces `results.csv`)
 
 ```bash
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes
 # or
-gri-ttc stats polygons.geojson --dest s3://tof-output --year 2023 -o results.csv
+gri-ttc stats polygons.geojson --dest s3://wri-restoration-geodata-ttc --year 2023 -o results.csv
 ```
 
 ### 2. Dry-run the patch
@@ -137,11 +137,11 @@ unless `--yes` is also set. The `GRI_TM_TOKEN` env var (or
 For a hot loop where you want stats + patch in one command:
 
 ```bash
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes \
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes \
     --tm-patch --tm-patch-project-id <TM_PROJECT_ID> \
     --tm-patch-env staging               # dry-run
 # then:
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes \
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes \
     --tm-patch --tm-patch-project-id <TM_PROJECT_ID> \
     --tm-patch-env staging --tm-patch-apply
 ```

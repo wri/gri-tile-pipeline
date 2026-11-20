@@ -7,10 +7,8 @@ from __future__ import annotations
 
 import json
 import os
-import random
-import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import requests
 import yaml
@@ -206,7 +204,7 @@ def run_download_s1_rtc(
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures.append((
             RetryingFuture(
-                fexec.call_async(_run_s1_rtc, (kw,), include_modules=["loaders", "lithops_workers"]),
+                fexec.call_async(_run_s1_rtc, (kw,), include_modules=["gri_tile_loaders", "lithops_workers"]),
                 _run_s1_rtc, (kw,), retries=retries,
             ),
             "S1_RTC", "us-west-2", tile_info,
@@ -239,7 +237,7 @@ def run_download_s1_rtc_local(
 
     Returns the :class:`JobTracker` with all results.
     """
-    from loaders.download_s1_rtc import run as s1_rtc_run
+    from gri_tile_loaders.download_s1_rtc import run as s1_rtc_run
 
     from gri_tile_pipeline.execution import run_local_tasks
 

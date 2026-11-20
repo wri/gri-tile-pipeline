@@ -18,13 +18,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tests.conftest import GOLDEN_DIR, GOLDEN_RAW, GOLDEN_TILES, MODEL_DIR
-from tests.parity.metrics import compare_predictions, print_parity_table
+from tests.constants import GOLDEN_DIR, GOLDEN_RAW, GOLDEN_TILES, MODEL_DIR
+from tests.parity.metrics import compare_predictions
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DIAG_DIR = REPO_ROOT / "temp" / "diagnostics"
 
-_loader_path = str(REPO_ROOT / "loaders")
+_loader_path = str(REPO_ROOT / "gri_tile_loaders")
 if _loader_path not in sys.path:
     sys.path.insert(0, _loader_path)
 
@@ -88,9 +88,10 @@ def load_reference_tif(tile_name: str) -> np.ndarray:
 
 
 @pytest.mark.parametrize("tile_name", GOLDEN_TILES)
+# Note: This test does NOT run when ard_file_tests = exclude in pyproject.toml file.
 def test_golden_diagnostics(tile_name):
     """Run diagnostic analysis on a golden tile: cloud removal on vs off."""
-    from loaders.predict_tile import predict_tile_from_arrays
+    from gri_tile_loaders.predict_tile import predict_tile_from_arrays
 
     tile_diag_dir = DIAG_DIR / tile_name
     os.makedirs(tile_diag_dir, exist_ok=True)

@@ -1,6 +1,5 @@
 """Unit tests for tracking/run_metadata.py."""
 
-import pytest
 
 from gri_tile_pipeline.tracking.run_metadata import PipelineRun, StepResult, TileStatus
 

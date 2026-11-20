@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 # Canonical source names for raw ARD. Used by per-source availability checks.
-ARD_SOURCES = ("dem", "s1", "s2_10", "s2_20", "s2_dates", "clouds")
+ARD_SOURCES: tuple[str, ...] = ("dem", "s1", "s2_10", "s2_20", "s2_dates", "clouds")
 
 
 def raw_ard_keys_by_source(year: int, x_tile: int, y_tile: int) -> dict[str, str]:

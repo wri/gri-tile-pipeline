@@ -1,5 +1,7 @@
 
 
+from collections.abc import Sequence
+
 import numpy as np
 import hickle as hkl
 import os
@@ -39,7 +41,7 @@ def load_raw(raw_data_folder: str, tile_id: str):
 
 
 
-def log_array_stats(tag: str, arr: np.ndarray, channel_names=None, channel_axis: int = -1, single_channel: bool = False):
+def log_array_stats(tag: str, arr: np.ndarray, channel_names: list[str] | None = None, channel_axis: int = -1, single_channel: bool = False):
     """
     Logs basic stats per channel.
 
@@ -88,7 +90,7 @@ def log_array_stats(tag: str, arr: np.ndarray, channel_names=None, channel_axis:
 # 
 # 
 
-def _find_tile_ids(raw_data_folder: str):
+def _find_tile_ids(raw_data_folder: str) -> list[str]:
     """Best-effort discovery of tile IDs present under the raw data folder."""
     candidates = set()
     try:
@@ -126,7 +128,7 @@ def _find_tile_ids(raw_data_folder: str):
     return sorted(candidates)
 
 
-def _log_dates_stats(tag: str, arr: np.ndarray):
+def _log_dates_stats(tag: str, arr: np.ndarray) -> None:
     if arr is None:
         logger.debug(f"{tag}: <None>")
         return
@@ -142,7 +144,7 @@ def _log_dates_stats(tag: str, arr: np.ndarray):
         logger.debug(f"{tag}: shape={a.shape}")
 
 
-def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names=None, bins: int = 256):
+def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names: list[str] | None = None, bins: int = 256) -> None:
     """Plot per-channel histograms over 0..65535 for arrays with channels in the last dim.
 
     - Supports arrays shaped (..., C). Collapses all but the last axis.
@@ -169,9 +171,13 @@ def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names=None, bins:
 
     num_channels = a.shape[-1]
     num_rows = num_channels
-    fig, axes = plt.subplots(num_rows, 1, figsize=(8, max(2, num_rows * 2)), sharex=True)
-    if num_rows == 1:
-        axes = [axes]
+    # squeeze=False (matching the same pattern used elsewhere in this file)
+    # guarantees a 2D array of Axes regardless of num_rows, so indexing below
+    # is always valid instead of returning a bare Axes when num_rows == 1.
+    fig, axes_grid = plt.subplots(
+        num_rows, 1, figsize=(8, max(2, num_rows * 2)), sharex=True, squeeze=False,
+    )
+    axes = axes_grid[:, 0]
     for c in range(num_channels):
         v = a[:, c].astype(np.float64, copy=False)
         try:
@@ -184,7 +190,7 @@ def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names=None, bins:
         axes[c].grid(True, linestyle=":", alpha=0.3)
     axes[-1].set_xlabel("DN (0..65535)")
     fig.suptitle(f"{tag} per-channel histograms")
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.tight_layout(rect=(0, 0.03, 1, 0.95))
     try:
         import matplotlib.pyplot as plt  # re-import for environments that require top-level reference
         plt.show()
@@ -192,7 +198,14 @@ def _plot_hist_for_channels(tag: str, arr: np.ndarray, channel_names=None, bins:
         pass
 
 
-def _plot_time_hw_c_hist_and_median_grid(groups, outfile: str = None, bins: int = 256, dates_info: dict = None, base_year: int = None, dem: np.ndarray = None):
+def _plot_time_hw_c_hist_and_median_grid(
+    groups: Sequence[tuple[str, np.ndarray, list[str] | None]],
+    outfile: str | None = None,
+    bins: int = 256,
+    dates_info: dict | None = None,
+    base_year: int | None = None,
+    dem: np.ndarray | None = None,
+) -> None:
     """Create a single-page figure showing per-channel histograms and median images.
 
     groups: list of tuples (tag: str, arr: np.ndarray, channel_names: list[str] | None)
@@ -298,7 +311,7 @@ def _plot_time_hw_c_hist_and_median_grid(groups, outfile: str = None, bins: int 
 
     axes[-1, 0].set_xlabel("DN (0..65535)")
     fig.suptitle("Per-channel histograms and median images")
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.tight_layout(rect=(0, 0.03, 1, 0.95))
 
     if outfile:
         try:
@@ -323,7 +336,7 @@ def _plot_time_hw_c_hist_and_median_grid(groups, outfile: str = None, bins: int 
 
                 # Dates pretty print
                 ax_text.axis('off')
-                def _format_doy_block(name: str, arr: np.ndarray):
+                def _format_doy_block(name: str, arr: np.ndarray | None):
                     if arr is None:
                         return f"{name}: <None>"
                     vals = np.asarray(arr).reshape(-1)
@@ -410,7 +423,7 @@ def _plot_time_hw_c_hist_and_median_grid(groups, outfile: str = None, bins: int 
             pass
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Log basic stats for raw tile arrays under a directory.")
     parser.add_argument("--directory", required=True, help="Path to raw data folder containing subdirs like s2_10, s2_20, clouds, misc, s1")
     parser.add_argument("--hist", action="store_true", help="Show per-channel histograms for s2_10, s2_20, and s1 (0..65535 x-axis)")

@@ -1,7 +1,6 @@
 """Unit tests for preprocessing/cloud_removal.py."""
 
 import numpy as np
-import pytest
 
 from gri_tile_pipeline.preprocessing.cloud_removal import (
     id_missing_px,

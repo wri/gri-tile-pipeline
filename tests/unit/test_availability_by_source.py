@@ -8,6 +8,7 @@ from gri_tile_pipeline.storage.tile_paths import (
     raw_ard_keys_by_source,
 )
 from gri_tile_pipeline.tiles.availability import AVAILABLE_SOURCES
+from tests.markers import has_aws
 
 
 def test_raw_ard_keys_by_source_returns_all_sources():
@@ -51,6 +52,7 @@ def test_check_availability_by_source_validates_sources():
         )
 
 
+@has_aws
 def test_check_availability_by_source_empty_tiles():
     from gri_tile_pipeline.tiles.availability import check_availability_by_source
 

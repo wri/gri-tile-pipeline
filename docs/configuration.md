@@ -52,7 +52,7 @@ these. Override individual keys if you need a custom path.
 | `euc1_config`    | DEM loader (`eu-central-1`)                 |
 | `usw2_config`    | S2 loader (`us-west-2`)                     |
 | `s1_usw2_config` | S1 RTC loader (`us-west-2`)                 |
-| `predict_config` | TF predict (`us-east-1`, co-located with `tof-output`) |
+| `predict_config` | TF predict (`us-east-1`, co-located with `wri-restoration-geodata-ttc`) |
 
 ### `download`
 
@@ -84,7 +84,7 @@ these. Override individual keys if you need a custom path.
 
 | Key                       | Type  | Default                 | Purpose                                                |
 | ------------------------- | ----- | ----------------------- | ------------------------------------------------------ |
-| `tile_bucket`             | str   | `tof-output`            | Bucket hosting prediction tiles                        |
+| `tile_bucket`             | str   | `wri-restoration-geodata-ttc` | Bucket hosting prediction tiles                        |
 | `tile_region`             | str   | `us-east-1`             | AWS region for `tile_bucket`                           |
 | `small_sites_area_thresh` | float | `0.5`                   | Hectares cutoff for small-site handling                |
 | `lulc_raster_path`        | str   | ""                      | LULC raster URI for error propagation (optional)       |
@@ -123,7 +123,7 @@ these. Override individual keys if you need a custom path.
 
 ```bash
 export LITHOPS_ENV=land-research
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes
 ```
 
 With `LITHOPS_ENV=land-research` set, the CLI reads:

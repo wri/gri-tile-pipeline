@@ -12,7 +12,7 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import click
@@ -20,13 +20,13 @@ import click
 from gri_tile_pipeline.config import PipelineConfig
 
 
-CTX_KEY = "gri_ctx"
+CTX_KEY: str = "gri_ctx"
 
 
 def resolve_pipeline_version() -> str:
     """Return installed ``gri-tile-pipeline`` version, or ``"unknown"``."""
     try:
-        from importlib.metadata import PackageNotFoundError, version
+        from importlib.metadata import version
 
         return version("gri-tile-pipeline")
     except Exception:

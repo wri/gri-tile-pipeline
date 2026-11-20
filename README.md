@@ -31,7 +31,7 @@ Every step is idempotent, writes to S3 at deterministic keys, and
 ## Install
 
 ```bash
-uv sync --extra all        # library + loaders + predict + zonal + dev
+uv sync --extra all        # library + gri_tile_loaders + predict + zonal + dev
 ```
 
 Python 3.11+ is required.
@@ -69,7 +69,7 @@ Pass `--local` on any command to run workers in-process instead.
 ### Full end-to-end for a TerraMatch short_name
 
 ```bash
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --yes
 ```
 
 Resolves tiles → downloads ARD → predicts → computes polygon stats →
@@ -85,7 +85,7 @@ sends).
 
 ```bash
 gri-ttc resolve polygons.geojson --year 2023 -o tiles.csv
-gri-ttc run tiles.csv --dest s3://tof-output \
+gri-ttc run tiles.csv --dest s3://wri-restoration-geodata-ttc \
     --steps download,predict,stats \
     --polygons polygons.geojson --year 2023 --yes
 ```
@@ -93,7 +93,7 @@ gri-ttc run tiles.csv --dest s3://tof-output \
 ### Availability check for a short_name (no compute)
 
 ```bash
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output --check-only --yes
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc --check-only --yes
 ```
 
 Runs steps 1–4 (extract polygons → TTC coverage → identify tiles →
@@ -104,7 +104,7 @@ check S3) and writes `temp/<label>_missing_tiles.csv`. Supports
 
 ```bash
 gri-ttc check polygons.geojson --year 2023 \
-    --dest s3://tof-output --check-type predictions -o missing.csv
+    --dest s3://wri-restoration-geodata-ttc --check-type predictions -o missing.csv
 ```
 
 See **[docs/quickstart.md](docs/quickstart.md)** for a fuller walk-through
@@ -124,22 +124,22 @@ and **[docs/cli_workflows.md](docs/cli_workflows.md)** for every flag.
 | **Check tile availability for a project**                | [guides/tiles_availability.md](docs/guides/tiles_availability.md) |
 | **Compute TTC stats from a geoparquet query**            | [guides/stats_run.md](docs/guides/stats_run.md)            |
 | **Patch TTC results back to TerraMatch**                 | [guides/terramatch_patch.md](docs/guides/terramatch_patch.md) |
-| Manual cross-account `tof-output` bucket policy refresh  | [manual_wri_policy_update.md](docs/manual_wri_policy_update.md) |
 
 ---
 
 ## Infrastructure in one paragraph
 
 Lithops fans out each pipeline step to AWS Lambda across three regions
-(eu-central-1 for DEM+S1, us-west-2 for S2, us-east-1 for predict —
-each co-located with its data source). Terraform provisions the IAM
-role and per-region Lithops state buckets in the `land-research`
-account; Lithops itself owns ECR repos and Lambda functions via
-`runtime build` / `runtime deploy`. The `wri` account owns
-`s3://tof-output` (where ARD and predictions live); a manual cross-
-account bucket policy grants `land-research` Lambdas read/write access.
-The full bring-up is in [docs/setup.md](docs/setup.md); the ownership
-split is in [docs/system_overview.md §5](docs/system_overview.md).
+(eu-central-1 for DEM, us-west-2 for S1+S2, us-east-1 for predict —
+each co-located with its data source). Everything lives in the
+`land-research` AWS account: Terraform provisions the IAM role,
+per-region Lithops state buckets, and the `wri-restoration-geodata-ttc`
+data bucket (ARD + predictions). Lithops itself owns ECR repos and
+Lambda functions via `runtime build` / `runtime deploy`. TF state is
+shared with other workflows in the account at
+`s3://wri-restoration-terraform-state-lr/gri-tile-pipeline/lr.tfstate`.
+The full bring-up is in [docs/setup.md](docs/setup.md); the
+architecture is in [docs/system_overview.md](docs/system_overview.md).
 
 ---
 

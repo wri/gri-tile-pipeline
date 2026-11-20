@@ -9,7 +9,7 @@ from pathlib import Path
 from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
 
 
-REQUIRED_COLUMNS = {"Year", "X", "Y", "X_tile", "Y_tile"}
+REQUIRED_COLUMNS: set[str] = {"Year", "X", "Y", "X_tile", "Y_tile"}
 
 
 @dataclass
@@ -20,7 +20,7 @@ class ValidationReport:
     missing_columns: list[str] = field(default_factory=list)
     extra_columns: list[str] = field(default_factory=list)
     parse_errors: list[str] = field(default_factory=list)
-    availability: dict | None = None  # populated when check_s3=True
+    availability: dict[str, int] | None = None  # populated when check_s3=True
 
     def as_dict(self) -> dict:
         return {

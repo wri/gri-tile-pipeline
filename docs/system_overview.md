@@ -66,12 +66,14 @@ and compose through the tiles CSV + `--dest` convention.
 
 ```
 gri-ttc
+├── doctor               Verify the local environment is ready to run the pipeline.
 ├── resolve              Input → canonical tiles CSV
+├── polygons-missing-ttc Lists polygons missinc ttc for specified project phase.
 ├── tiles
-│   ├── missing          Tiles for polygons with null TTC
+│   ├── missing          Tiles for polygons with null TTC for given project phase
 │   ├── split            Chunk a tiles CSV
 │   └── validate         Schema (+ optional S3 presence) check
-├── check                Availability on S3 (binary or --check-type)
+├── check                Availability of tiles on S3 (binary or --check-type)
 ├── cost                 Estimate Lambda cost without running
 ├── download             Fan out ARD generation via Lithops
 ├── download-s1-legacy   (to be folded into `download --s1-backend`)
@@ -87,6 +89,7 @@ gri-ttc
     ├── show <id>        Full summary for one run
     ├── failed <id>      Emit a retryable failed-tiles CSV
     └── retry <id>       Suggest the retry command
+├── tm_patch             Pushes ttc results up to TerraMatch
 ```
 
 ### Unified input resolution
@@ -153,8 +156,8 @@ ownership of ECR, container images, and Lambda functions — deployed via
 |---|---|
 | Lambda execution role | **Terraform** |
 | Lithops state S3 buckets (per region) | **Terraform** |
-| TF state backend (bucket + lock table) | **Terraform bootstrap** |
-| Cross-account S3 access on `tof-output` | **Manual runbook** ([`manual_wri_policy_update.md`](manual_wri_policy_update.md)) — Terraform only emits the statement JSON |
+| TTC data bucket (`wri-restoration-geodata-ttc`) | **Terraform** |
+| TF state backend (shared `wri-restoration-terraform-state-lr` + `terraform-state-lock` DDB) | Managed by the `gri-prefect-orchestration` workflow; this pipeline writes to key `gri-tile-pipeline/lr.tfstate` |
 | ECR repositories | **Lithops** (auto-created) |
 | Container images (`ttc-loaders-dev`, `ttc-s1-dev`, `ttc-predict-dev`) | **Lithops** (`runtime build`) |
 | Lambda functions | **Lithops** (`runtime deploy` or lazy) |
@@ -165,12 +168,13 @@ ownership of ECR, container images, and Lambda functions — deployed via
 ```
 infra/
 ├── terraform/
-│   ├── bootstrap/                     # TF state bucket + lock (one-shot)
 │   ├── modules/
 │   │   ├── lithops-iam-role/
 │   │   ├── lithops-prereqs/
-│   │   └── cross-account-s3-access/   # Output-only: emits statement JSON for the manual runbook
-│   └── envs/land-research/            # Instantiates modules (land-research only — no wri provider)
+│   │   └── cross-account-s3-access/   # Only used by the legacy datalab-test env
+│   └── envs/
+│       ├── land-research/             # Primary: single-account, shared TF state
+│       └── datalab-test/              # Legacy: two-account dev env with local TF state
 ├── lithops/
 │   ├── config.*.yaml.tmpl             # Templates with ${VAR} placeholders
 │   └── render.py                      # terraform output → envsubst → .lithops/<env>/
@@ -179,59 +183,58 @@ infra/
 
 ### Account model
 
-- **land-research** — compute. ECR, Lambda, Lithops state buckets live here.
-  Terraform manages this account.
-- **wri** — data store. Owns `tof-output` (ARD + predictions) in us-east-1.
-  Terraform **never** touches this account. The cross-account bucket policy
-  on `tof-output` is applied manually, following
-  [`manual_wri_policy_update.md`](manual_wri_policy_update.md).
+Single AWS account: **land-research** (`058755926933`). Compute (ECR,
+Lambda, IAM role), Lithops state buckets, and the TTC data bucket
+(`wri-restoration-geodata-ttc`) all live here. Terraform state is
+shared with other workflows in the account at
+`s3://wri-restoration-terraform-state-lr/gri-tile-pipeline/lr.tfstate`.
+
+The legacy `envs/datalab-test/` module emits cross-account statement
+JSON for an older two-account pattern; it is retained for reference
+only and is not part of the active deployment path.
 
 ### Per-runtime regions
 
-Loaders co-locate with their data sources; predict co-locates with
-`tof-output`:
+Loaders co-locate with their data sources; predict co-locates with the
+TTC data bucket:
 
 | Runtime | Region | Why |
 |---|---|---|
 | `ttc-loaders-dev` (S2) | us-west-2 | Sentinel-2 Registry of Open Data |
 | `ttc-loaders-dev` (DEM) | eu-central-1 | Copernicus DEM |
-| `ttc-s1-dev` | us-west-2 | Azure (internet egress either way) |
-| `ttc-predict-dev` | us-east-1 | `tof-output` is us-east-1 |
+| `ttc-s1-dev` | us-west-2 | Planetary Computer S1 RTC (Azure; internet egress either way) |
+| `ttc-predict-dev` | us-east-1 | `wri-restoration-geodata-ttc` is us-east-1 |
 
 ### Deployment flow
 
 ```
-1. Terraform bootstrap (one-shot per account)
-     cd infra/terraform/bootstrap && terraform apply
-     → TF state bucket + DynamoDB lock
+1. Terraform env apply (land-research)
+     cd infra/terraform/envs/land-research
+     terraform init -backend-config=bucket=wri-restoration-terraform-state-lr \
+                    -backend-config=region=us-east-1 \
+                    -backend-config=dynamodb_table=terraform-state-lock
+     terraform apply
+     → IAM role, 3 Lithops state buckets (usw2/euc1/use1),
+       TTC data bucket
 
-2. Terraform env apply (land-research only)
-     cd infra/terraform/envs/land-research && terraform apply
-     → IAM role, 3 Lithops state buckets (usw2/euc1/use1), cross-account
-       statement JSON (output — not applied)
-
-3. Manual wri policy update
-     Follow docs/manual_wri_policy_update.md against the wri account.
-     → cross-account grant on tof-output picked up on the next Lambda call
-
-4. Render Lithops configs from Terraform outputs
+2. Render Lithops configs from Terraform outputs
      make -C infra render ENV=land-research
      → .lithops/land-research/config.{loaders-usw2,loaders-euc1,s1,predict}.yaml
 
-5. Gate A — local container parity before any ECR push
+3. Gate A — local container parity before any ECR push
      make -C infra gate-a
      → runs the predict image locally against a golden tile
 
-6. Build and deploy Lithops runtimes
+4. Build and deploy Lithops runtimes
      make -C infra build-all ENV=land-research
      → Lithops pushes 4 images to ECR and (lazily) creates Lambdas
 
-7. Gate B — Lambda parity
-     PARITY_LAMBDA=1 uv run pytest tests/parity/test_lambda_parity.py -v -s
-     → numeric parity vs golden reference TIFs; required before use
+5. Gate B — Lambda parity
+     uv run python scripts/predict_lambda_benchmark.py --tiles 20
+     → numeric parity + cold/warm baselines vs golden reference TIFs
 
-8. Switch the pipeline to the new account
-     export AWS_PROFILE=resto-user LITHOPS_ENV=land-research
+6. Drive the pipeline
+     export AWS_PROFILE=LandResearchUser-058755926933 LITHOPS_ENV=land-research
      gri-ttc run ...
 ```
 
@@ -304,15 +307,15 @@ significant size.
 ### "Run a TerraMatch project end to end"
 
 ```
-gri-ttc run-project GHA_22_INEC --dest s3://tof-output
+gri-ttc run-project GHA_22_INEC --dest s3://wri-restoration-geodata-ttc
 ```
 
 Or step by step:
 
 ```
 gri-ttc resolve GHA_22_INEC -o tiles.csv
-gri-ttc check tiles.csv --dest s3://tof-output -o missing.csv
-gri-ttc run missing.csv --dest s3://tof-output --steps download,predict,stats \
+gri-ttc check tiles.csv --dest s3://wri-restoration-geodata-ttc -o missing.csv
+gri-ttc run missing.csv --dest s3://wri-restoration-geodata-ttc --steps download,predict,stats \
     --polygons polys.geojson --year 2023
 ```
 
@@ -320,7 +323,7 @@ gri-ttc run missing.csv --dest s3://tof-output --steps download,predict,stats \
 
 ```
 gri-ttc tiles missing --short-name RWA_23_AEE -o gap.csv
-gri-ttc run gap.csv --dest s3://tof-output 
+gri-ttc run gap.csv --dest s3://wri-restoration-geodata-ttc 
 ```
 
 ### "What's the current TTC coverage for a cohort?"
@@ -337,7 +340,7 @@ missing-tiles CSV).
 ```
 gri-ttc runs list
 gri-ttc runs failed abc12345 -o retry.csv
-gri-ttc run retry.csv --dest s3://tof-output --steps predict --yes
+gri-ttc run retry.csv --dest s3://wri-restoration-geodata-ttc --steps predict --yes
 ```
 
 ### "Preview a single polygon on its prediction tiles"
