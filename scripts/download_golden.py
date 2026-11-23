@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """Hydrate example/golden/ with ARD + reference TIFs for the parity tests.
 
-Pulls the three golden tiles (1000X798Y / 799Y / 800Y) from S3 into the
-local layout expected by tests/parity/test_golden_parity.py and
-tests/parity/test_golden_diagnostics.py. Without this data those tests
-skip with "Golden test data not found".
+Pulls the frozen tree-cover golden set from the model registry
+(s3://wri-restoration-model-registry/golden-sets/tree-cover/<version>/) into
+the local layout expected by tests/parity/test_golden_parity.py and
+tests/parity/test_golden_diagnostics.py, verifying every file against the
+SHA-256 in the set's manifest.json. Without this data those tests skip with
+"Golden test data not found".
+
+The golden set is frozen (write-once, Object Lock) rather than read from the
+production YEAR/raw/ and YEAR/tiles/ paths, which re-runs overwrite in place.
+Each case is ``<tile>_<year>`` and its files are stored with the same
+relative layout as example/golden/ (raw/s2_10/<tile>.hkl, <tile>_FINAL.tif, ...).
 
 Also pulls one extra reference tile (1000X871Y) into example/raw_v2/,
 using the same set of raw ARD sources as the golden tiles above (s2_10,
@@ -12,15 +19,12 @@ s2_20, s1, dem, s2_dates, clouds) plus its FINAL tif - just rooted at
 example/sample_ard/raw_v2/ instead of example/golden/, and with the tif written
 flat rather than nested. Independent of the golden fixture set above.
 
-Each tile carries its own ARD year, so tiles can be pulled from
-different years in a single run.
-
 Usage:
     AWS_PROFILE=AWSAdministratorAccess-058755926933 \\
         uv run python scripts/download_golden.py
 
-    # Pick a different bucket:
-    uv run python scripts/download_golden.py --dest s3://other-bucket
+    # Pick a different golden-set version or reference-tile bucket:
+    uv run python scripts/download_golden.py --golden-version v2 --dest s3://other-bucket
 
 Writes (golden tiles):
     example/golden/raw/s2_10/{tile}.hkl
@@ -46,6 +50,8 @@ example/ is gitignored, so this only touches the local working tree.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -64,13 +70,10 @@ GOLDEN_DIR: Path = EXAMPLE_DIR / "golden"
 GOLDEN_RAW: Path = GOLDEN_DIR / "raw"
 RAW_V2_DIR: Path = EXAMPLE_DIR / "sample_ard" / "raw_v2"
 
-# Matches tests/conftest.py:GOLDEN_TILES. Each entry is (x, y, year) - the
-# year travels with the tile so tiles can come from different ARD years.
-TILES: list[tuple[int, int, int]] = [
-    (1000, 798, 2023),
-    (1000, 799, 2023),
-    (1000, 800, 2023),
-]
+# Frozen golden set in the model registry. Cases are listed in its manifest.json
+# and match tests/constants.py:GOLDEN_TILES.
+GOLDEN_SET_URI: str = "s3://wri-restoration-model-registry/golden-sets/tree-cover"
+DEFAULT_GOLDEN_VERSION: str = "v1"
 
 # Extra reference tile(s): the same raw ARD source set as the golden
 # tiles above, plus the FINAL tif, written into example/raw_v2/. Not part
@@ -99,11 +102,6 @@ def _raw_local_path_for_source(raw_root: Path, src: str, x: int, y: int) -> Path
     return raw_root / src / f"{tag}.hkl"
 
 
-def _golden_local_path_for_source(src: str, x: int, y: int) -> Path:
-    """Map ARD source name → local path under example/golden/raw/."""
-    return _raw_local_path_for_source(GOLDEN_RAW, src, x, y)
-
-
 def _download(store: ObjectStore, key: str, dest_path: Path, *, force: bool) -> tuple[bool, str]:
     """Download a single object. Returns (success, status)."""
     rel = dest_path.relative_to(REPO_ROOT)
@@ -118,29 +116,19 @@ def _download(store: ObjectStore, key: str, dest_path: Path, *, force: bool) -> 
     return True, f"[ok] {key} -> {rel} ({len(data):,} bytes)"
 
 
-def _download_golden_tile(
-    store: ObjectStore,
-    x: int,
-    y: int,
-    year: int,
-    *,
-    force: bool,
-    missing: list[str],
-) -> None:
-    """Download all raw ARD sources + the FINAL tif for one golden tile."""
-    for src, key in raw_ard_keys_by_source(year, x, y).items():
-        local = _golden_local_path_for_source(src, x, y)
-        ok, status = _download(store, key, local, force=force)
-        print(status)
-        if not ok:
-            missing.append(key)
-
-    tif_key = prediction_key(year, x, y)
-    tif_local = GOLDEN_DIR / f"{x}X{y}Y_FINAL.tif"
-    ok, status = _download(store, tif_key, tif_local, force=force)
-    print(status)
-    if not ok:
-        missing.append(tif_key)
+def _download_golden_set(store: ObjectStore, *, force: bool, missing: list[str]) -> None:
+    """Download every case file listed in the golden set's manifest, verifying SHA-256."""
+    manifest = json.loads(bytes(obs.get(store, "manifest.json").bytes()))
+    for case in manifest["cases"]:
+        for f in case["files"]:
+            local = GOLDEN_DIR / f["path"]
+            key = f"cases/{case['short_name']}/{f['path']}"
+            ok, status = _download(store, key, local, force=force)
+            if ok and hashlib.sha256(local.read_bytes()).hexdigest() != f["sha256"]:
+                ok, status = False, f"[SHA-256 MISMATCH] {local.relative_to(REPO_ROOT)} (stale? re-run with --force)"
+            print(status)
+            if not ok:
+                missing.append(key)
 
 
 def _download_reference_tile(
@@ -179,7 +167,9 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--dest", default=DEFAULT_DEST,
-                    help=f"S3 root URI (default: {DEFAULT_DEST})")
+                    help=f"S3 root URI for the reference tile(s) (default: {DEFAULT_DEST})")
+    ap.add_argument("--golden-version", default=DEFAULT_GOLDEN_VERSION,
+                    help=f"Golden-set version under {GOLDEN_SET_URI} (default: {DEFAULT_GOLDEN_VERSION})")
     ap.add_argument("--region", default="us-east-1")
     ap.add_argument("--profile", default=None,
                     help="AWS profile (else default credential chain).")
@@ -188,16 +178,16 @@ def main() -> int:
     args = ap.parse_args()
 
     store = from_dest(args.dest, region=args.region, profile=args.profile)
-    total = len(TILES) + len(REFERENCE_TIF_TILES)
-    print(f"Downloading {total} object(s) from {args.dest}")
-    print(f"Golden target: {GOLDEN_DIR.relative_to(REPO_ROOT)}")
+    golden_uri = f"{GOLDEN_SET_URI}/{args.golden_version}"
+    golden_store = from_dest(golden_uri, region=args.region, profile=args.profile)
+    print(f"Golden set: {golden_uri} -> {GOLDEN_DIR.relative_to(REPO_ROOT)}")
+    print(f"Reference tile(s): {args.dest}")
     print(f"Raw v2 target: {RAW_V2_DIR.relative_to(REPO_ROOT)} (same source set as golden)")
     print()
 
     missing: list[str] = []
 
-    for x, y, year in TILES:
-        _download_golden_tile(store, x, y, year, force=args.force, missing=missing)
+    _download_golden_set(golden_store, force=args.force, missing=missing)
 
     for x, y, year in REFERENCE_TIF_TILES:
         _download_reference_tile(store, x, y, year, force=args.force, missing=missing)
