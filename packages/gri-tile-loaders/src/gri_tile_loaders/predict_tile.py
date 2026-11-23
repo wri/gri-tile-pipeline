@@ -727,20 +727,19 @@ def predict_tile_from_arrays(
         logger.info(f"Post-cloud id_missing_px(10): removed {len(missing_strict)} images, "
                      f"{s2_full.shape[0]} remain")
 
-    # Replace zero and 1.0 values with temporal median (reference lines 1156-1164)
-    # Reference recomputes np.median(arr, axis=0) inside the loop (cascading updates)
-    if np.sum(s2_full == 0) > 0:
-        for i in range(s2_full.shape[0]):
-            arr_i = s2_full[i]
-            zero_mask = arr_i == 0
-            if np.any(zero_mask):
-                arr_i[zero_mask] = np.median(s2_full, axis=0)[zero_mask]
-    if np.sum(s2_full == 1) > 0:
-        for i in range(s2_full.shape[0]):
-            arr_i = s2_full[i]
-            one_mask = arr_i == 1
-            if np.any(one_mask):
-                arr_i[one_mask] = np.median(s2_full, axis=0)[one_mask]
+    # Replace exact 0 and 1.0 values with the per-pixel temporal median.
+    # Matches reference 0654ad6 deal_w_missing_px (download_and_predict_job.py
+    # L1221-L1232): the median is computed ONCE, before any fill. Older reference
+    # (437b2a2 L1156-L1164) recomputed it per frame after earlier frames had been
+    # filled in place (cascading), so exact-0/1 pixels get slightly different fills
+    # than before; this is a deliberate change for speed on long time series.
+    median_img = np.median(s2_full, axis=0)
+    mask0 = s2_full == 0
+    if np.any(mask0):
+        s2_full[mask0] = np.broadcast_to(median_img, s2_full.shape)[mask0]
+    mask1 = s2_full == 1
+    if np.any(mask1):
+        s2_full[mask1] = np.broadcast_to(median_img, s2_full.shape)[mask1]
 
     # Remove timesteps with NaN values (reference lines 1165-1170)
     nan_timesteps = np.argwhere(

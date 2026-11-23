@@ -855,8 +855,18 @@ def align_interp_array_lr(
             else:
                 return interp_array[0], to_remove
 
+            # Early exits ported from reference 0654ad6 (cloud_removal.py
+            # L416-L425, L439-L443): with no fully-clear pixels in the window the
+            # list above holds empty arrays and np.percentile([]) below raised
+            # IndexError, failing the whole tile; with <100 samples a per-band
+            # regression isn't worth fitting. Both return the raw mosaic.
+            if non_interp_mid_mosaic.shape[0] == 0:
+                return interp_array[0], to_remove
+
             # Equibatch sampling by EVI quintiles
             n_samples = min(90000, non_interp_mid_mosaic.shape[0])
+            if n_samples < 100:
+                return interp_array[0], to_remove
             n_samples_i = n_samples // 5
             ndvi_i = _evi(non_interp_mid_areas)
 
@@ -875,10 +885,12 @@ def align_interp_array_lr(
             p100 = np.argwhere(ndvi_i >= b80).squeeze()
             p98 = np.argwhere(ndvi_i >= b98).squeeze()
 
-            # Ensure 1-D arrays for repeat/shuffle
-            for arr_ref in [p2, p20, p40, p60, p80, p100, p98]:
-                if arr_ref.ndim == 0:
-                    arr_ref = arr_ref.reshape(1)
+            # Ensure 1-D arrays for repeat/shuffle/slicing: .squeeze() turns a
+            # single-element bucket into a 0-d array, which can't be sliced.
+            # (The previous loop rebound its loop variable and was a no-op.)
+            p2, p20, p40, p60, p80, p100, p98 = (
+                np.atleast_1d(a) for a in (p2, p20, p40, p60, p80, p100, p98)
+            )
 
             p98 = np.repeat(p98, 10)
             p2 = np.repeat(p2, 10)
