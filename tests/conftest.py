@@ -167,6 +167,11 @@ def pytest_configure(config):
         new_value = max_workers
 
     config.option.numprocesses = new_value
+    # xdist's pytest_cmdline_main runs *before* pytest_configure and has already
+    # resolved -n into config.option.tx (one "popen" spec per worker), which is
+    # what DSession actually spawns from. Rebuild it or the cap has no effect.
+    if new_value and getattr(config.option, "tx", None):
+        config.option.tx = ["popen"] * new_value
 
 
 def pytest_unconfigure(config):
