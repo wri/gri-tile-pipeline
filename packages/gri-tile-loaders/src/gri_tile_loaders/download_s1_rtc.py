@@ -717,7 +717,11 @@ def _search_stac_items(
             collections=[RTC_COLLECTION],
             datetime=f"{year}-01-01/{year}-12-31",
             intersects=bbox_geojson,
-            query=orbit_query,
+            # Planetary Computer rejects an empty query ({}) with
+            # BadRequestError "The and operator requires an array of args."
+            # (observed 2026-11-25). AUTO/BOTH orbit modes pass {}, so send
+            # None instead to omit the filter entirely.
+            query=orbit_query or None,
             limit=500,
         )
         return list(search.items())

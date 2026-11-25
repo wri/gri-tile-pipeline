@@ -98,7 +98,9 @@ gri-shared-library = { git = "https://github.com/wri/gri-shared-library.git", br
 [tool.pytest.ini_options]
 ard_file_tests = "exclude"       # exclude | include | only  (Default is exclude. GH workflow always specifies exclude.)
                                  # Controls whether tests named test_golden_* or test_ard_* are executed.
-ard_file_max_workers = ""        # blank = derive from headroom below
+ard_file_max_workers = "1"       # each worker loads TF and re-predicts golden tiles (the prediction
+                                 # cache is per-process), so >1 worker multiplies RAM and can OOM a
+                                 # 16 GB laptop/WSL. Blank = derive from headroom below.
 ard_file_worker_headroom = "2"   # workers = vCPU count - 2 (min 1) when ard_file_tests=only
 testpaths = ["tests"]
 pythonpath = ["."]

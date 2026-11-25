@@ -1,4 +1,4 @@
-"""Golden tile parity tests: run prediction on 3 golden tiles and compare to reference TIFs.
+"""Golden tile parity tests: run prediction on the golden tiles and compare to reference TIFs.
 
 Usage:
     pytest tests/parity/test_golden_parity.py -v -s

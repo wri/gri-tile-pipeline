@@ -91,5 +91,5 @@ docker/.git_sha
 .idea
 
 # testing objects
-local*
-data/
+/local*
+/data/
