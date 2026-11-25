@@ -10,15 +10,14 @@ by default.  The legacy Earth Search GRD-based S1 loader is available via
 from __future__ import annotations
 
 import os
-import time
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import yaml
 from loguru import logger
 
 from gri_tile_pipeline.config import PipelineConfig
 from gri_tile_pipeline.tiles.csv_io import read_tiles_csv
-from gri_tile_pipeline.tracking import JobTracker, JobResult
+from gri_tile_pipeline.tracking import JobTracker
 from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
 
 
@@ -27,13 +26,12 @@ from gri_tile_pipeline.tracking.job_tracker import wait_all_with_tracking
 # ------------------------------------
 # Workers live in lithops_workers.py so Lithops can pickle/unpickle them
 # on Lambda without needing gri_tile_pipeline installed.
-# The path import ensures loaders/ and lithops_workers are findable.
+# The path import ensures gri_tile_loaders/ and lithops_workers are findable.
 
 import gri_tile_pipeline.steps._lithops_path  # noqa: F401  (adds repo root to sys.path)
 
 from lithops_workers import run_dem as _run_dem
 from lithops_workers import run_s1_rtc as _run_s1_rtc
-from lithops_workers import run_s1_legacy as _run_s1_legacy
 from lithops_workers import run_s2 as _run_s2
 
 
@@ -41,16 +39,16 @@ from lithops_workers import run_s2 as _run_s2
 # Cost estimation
 # ------------------------------------
 
-PRICE_PER_GB_SEC = 0.00001667
+PRICE_PER_GB_SEC: float = 0.00001667
 
 # Historical average durations per task type (seconds)
-AVG_DURATIONS = {"DEM": 9, "S1": 14, "S2": 62}
+AVG_DURATIONS: dict[str, int] = {"DEM": 9, "S1": 14, "S2": 62}
 
 
-def estimate_cost(num_tiles: int, memory_mb: int) -> Dict[str, float]:
+def estimate_cost(num_tiles: int, memory_mb: int) -> dict[str, float]:
     """Return per-task-type and total estimated Lambda costs."""
     mem_gb = memory_mb / 1024.0
-    costs = {}
+    costs: dict[str, float] = {}
     for task, avg_sec in AVG_DURATIONS.items():
         costs[task] = num_tiles * avg_sec * mem_gb * PRICE_PER_GB_SEC
     costs["total"] = sum(costs.values())
@@ -134,7 +132,7 @@ def run_download_ard(
     cfg_usw2.setdefault("aws_lambda", {})["runtime"] = runtime
     cfg_s1.setdefault("aws_lambda", {})["runtime"] = cfg.s1_rtc.runtime
 
-    base_kwargs: List[Dict[str, Any]] = [
+    base_kwargs: list[dict[str, Any]] = [
         {
             "year": t["year"],
             "lon": t["lon"],
@@ -159,12 +157,12 @@ def run_download_ard(
     retry_s1 = lithops.RetryingFunctionExecutor(fexec_s1)
 
     # DEM -> eu-central-1
-    futures_euc1: List[Tuple[RetryingFuture, str, str, Dict[str, Any]]] = []
+    futures_euc1: list[tuple[RetryingFuture, str, str, dict[str, Any]]] = []
     for kw in base_kwargs:
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures_euc1.append((
             RetryingFuture(
-                fexec_euc1.call_async(_run_dem, (kw,), include_modules=["loaders", "lithops_workers"]),
+                fexec_euc1.call_async(_run_dem, (kw,), include_modules=["gri_tile_loaders", "lithops_workers"]),
                 _run_dem, (kw,), retries=retries,
             ),
             "DEM", "eu-central-1", tile_info,
@@ -172,25 +170,25 @@ def run_download_ard(
 
     # S1 RTC -> us-west-2 (Planetary Computer)
     s1_retries = retries if retries is not None else cfg.s1_rtc.retries
-    futures_s1: List[Tuple[RetryingFuture, str, str, Dict[str, Any]]] = []
+    futures_s1: list[tuple[RetryingFuture, str, str, dict[str, Any]]] = []
     for kw in base_kwargs:
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         s1_kw = {**kw, "sas_token": pc_sas_token}
         futures_s1.append((
             RetryingFuture(
-                fexec_s1.call_async(_run_s1_rtc, (s1_kw,), include_modules=["loaders", "lithops_workers"]),
+                fexec_s1.call_async(_run_s1_rtc, (s1_kw,), include_modules=["gri_tile_loaders", "lithops_workers"]),
                 _run_s1_rtc, (s1_kw,), retries=s1_retries,
             ),
             "S1_RTC", "us-west-2", tile_info,
         ))
 
     # S2 -> us-west-2
-    futures_usw2: List[Tuple[RetryingFuture, str, str, Dict[str, Any]]] = []
+    futures_usw2: list[tuple[RetryingFuture, str, str, dict[str, Any]]] = []
     for kw in base_kwargs:
         tile_info = {k: kw[k] for k in ("year", "lon", "lat", "X_tile", "Y_tile")}
         futures_usw2.append((
             RetryingFuture(
-                fexec_usw2.call_async(_run_s2, (kw,), include_modules=["loaders", "lithops_workers"]),
+                fexec_usw2.call_async(_run_s2, (kw,), include_modules=["gri_tile_loaders", "lithops_workers"]),
                 _run_s2, (kw,), retries=retries,
             ),
             "S2", "us-west-2", tile_info,
@@ -218,7 +216,7 @@ def run_download_ard(
 # Local execution
 # ------------------------------------
 
-def _build_base_kwargs(tiles, dest, debug=False):
+def _build_base_kwargs(tiles: list[dict[str, Any]], dest: str, debug: bool = False) -> list[dict[str, Any]]:
     """Build list of per-tile keyword dicts for workers."""
     return [
         {
@@ -252,9 +250,9 @@ def run_download_ard_local(
 
     Returns the :class:`JobTracker` with all results.
     """
-    from loaders.download_dem import run as dem_run
-    from loaders.download_s1_rtc import run as s1_rtc_run
-    from loaders.download_s2 import run as s2_run
+    from gri_tile_loaders.download_dem import run as dem_run
+    from gri_tile_loaders.download_s1_rtc import run as s1_rtc_run
+    from gri_tile_loaders.download_s2 import run as s2_run
 
     from gri_tile_pipeline.execution import run_local_tasks
     from gri_tile_pipeline.steps.download_s1_rtc import ensure_pc_collection_token
@@ -311,9 +309,9 @@ def run_download_ard_legacy_s1_local(
 
     Returns the :class:`JobTracker` with all results.
     """
-    from loaders.download_dem import run as dem_run
-    from loaders.download_s1 import run as s1_run
-    from loaders.download_s2 import run as s2_run
+    from gri_tile_loaders.download_dem import run as dem_run
+    from gri_tile_loaders.download_s1 import run as s1_run
+    from gri_tile_loaders.download_s2 import run as s2_run
 
     from gri_tile_pipeline.execution import run_local_tasks
 

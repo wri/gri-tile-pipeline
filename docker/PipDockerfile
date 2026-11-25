@@ -56,6 +56,7 @@ RUN pip install --upgrade --no-cache-dir --ignore-installed \
     shapely \
     pyproj \
     pystac-client \
+    planetary-computer \
     odc-stac \
     odc-geo \
     obstore \

@@ -20,7 +20,7 @@ Functions fall into three groups:
 from __future__ import annotations
 
 import random
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 from loguru import logger
@@ -303,7 +303,7 @@ def identify_clouds_shadows(
     clouds = np.zeros_like(shadows, dtype=np.float32)
 
     # Initial Hollstein cloud mask for shadow detection
-    def _hollstein_cld(arr):
+    def _hollstein_cld(arr: np.ndarray) -> np.ndarray:
         step1 = arr[..., 7] > 0.166
         step2b = arr[..., 1] > 0.28
         step3 = arr[..., 5] / arr[..., 8] < 4.292
@@ -402,7 +402,9 @@ def identify_clouds_shadows(
                 close[0] -= 1
         if len(close) == 2:
             if close[-1] >= (img.shape[0] - 2) and img.shape[0] > 3:
-                close = np.concatenate([np.array([close[0] - 1]), close])
+                # Keep `close` a plain list of ints (its type throughout the
+                # rest of this loop) rather than letting it become an ndarray.
+                close = np.concatenate([np.array([close[0] - 1]), close]).tolist()
 
         ri_ref = np.copy(img[..., [0, 1, 2]])
         if img.shape[0] > 2:
@@ -509,8 +511,10 @@ def identify_clouds_shadows(
         shadows[i][toremove] = 0.0
 
     # NIR/SWIR ratio false positive removal
-    nir_swir_ratio = img[..., 3] / (img[..., 8] + 0.01)
-    nir_swir_ratio = nir_swir_ratio < 0.75
+    # Keep `nir_swir_ratio` a single boolean-mask type throughout (the ratio
+    # itself is only an intermediate value, never used after thresholding).
+    nir_swir_ratio_value = img[..., 3] / (img[..., 8] + 0.01)
+    nir_swir_ratio = nir_swir_ratio_value < 0.75
     nir_swir_ratio = binary_dilation(nir_swir_ratio, iterations=3)
     for i in range(clouds.shape[0]):
         mini = max(i - 1, 0)
@@ -540,7 +544,6 @@ def identify_clouds_shadows(
         clouds[i][brightness_threshold.astype(bool)] = 0.0
 
     # Dilate clouds
-    struct2 = generate_binary_structure(2, 2)
     for i in range(clouds.shape[0]):
         clouds[i] = 1 - (binary_dilation(clouds[i] == 0, iterations=1))
         pfcps[i] = binary_dilation(pfcps[i], iterations=5)
@@ -635,7 +638,7 @@ def identify_clouds_shadows(
 
 def id_areas_to_interp(
     probs: np.ndarray,
-    **_kwargs,
+    **_kwargs: Any,
 ) -> np.ndarray:
     """Build soft interpolation masks from cloud probability maps.
 
@@ -818,7 +821,6 @@ def align_interp_array_lr(
 
     if np.sum(interp[date] > 0) > 0 and np.sum(interp[date] == 0) > 0:
         if np.mean(np.logical_and(interp[date] < 1, water_mask <= 1)) > 0.01:
-            array_i = np.copy(array[date])
             interp_array_i = np.copy(interp_array[0])
 
             n_current_time = np.sum(np.logical_and(interp[date] == 0, water_mask <= 1))
@@ -853,8 +855,18 @@ def align_interp_array_lr(
             else:
                 return interp_array[0], to_remove
 
+            # Early exits ported from reference 0654ad6 (cloud_removal.py
+            # L416-L425, L439-L443): with no fully-clear pixels in the window the
+            # list above holds empty arrays and np.percentile([]) below raised
+            # IndexError, failing the whole tile; with <100 samples a per-band
+            # regression isn't worth fitting. Both return the raw mosaic.
+            if non_interp_mid_mosaic.shape[0] == 0:
+                return interp_array[0], to_remove
+
             # Equibatch sampling by EVI quintiles
             n_samples = min(90000, non_interp_mid_mosaic.shape[0])
+            if n_samples < 100:
+                return interp_array[0], to_remove
             n_samples_i = n_samples // 5
             ndvi_i = _evi(non_interp_mid_areas)
 
@@ -873,17 +885,25 @@ def align_interp_array_lr(
             p100 = np.argwhere(ndvi_i >= b80).squeeze()
             p98 = np.argwhere(ndvi_i >= b98).squeeze()
 
-            # Ensure 1-D arrays for repeat/shuffle
-            for arr_ref in [p2, p20, p40, p60, p80, p100, p98]:
-                if arr_ref.ndim == 0:
-                    arr_ref = arr_ref.reshape(1)
+            # Ensure 1-D arrays for repeat/shuffle/slicing: .squeeze() turns a
+            # single-element bucket into a 0-d array, which can't be sliced.
+            # (The previous loop rebound its loop variable and was a no-op.)
+            p2, p20, p40, p60, p80, p100, p98 = (
+                np.atleast_1d(a) for a in (p2, p20, p40, p60, p80, p100, p98)
+            )
 
             p98 = np.repeat(p98, 10)
             p2 = np.repeat(p2, 10)
             if seed is not None:
                 random.seed(seed + date)
             for a in [p2, p98, p20, p40, p60, p80, p100]:
-                random.shuffle(a)
+                # random.shuffle works fine in-place on an ndarray at runtime
+                # (it only needs __len__/__getitem__/__setitem__); typeshed
+                # types the parameter as MutableSequence[Any], which ndarray
+                # doesn't structurally satisfy. Using np.random.shuffle here
+                # instead would draw from a different RNG than the
+                # random.seed() call above, so keep random.shuffle.
+                random.shuffle(a)  # type: ignore[arg-type]
 
             p20 = p20[:n_samples_i]
             p40 = p40[:n_samples_i]
@@ -891,7 +911,7 @@ def align_interp_array_lr(
             p80 = p80[:n_samples_i]
             p100 = p100[:n_samples_i]
             random_sample = np.concatenate([p2, p20, p40, p60, p80, p100, p98])
-            random.shuffle(random_sample)
+            random.shuffle(random_sample)  # type: ignore[arg-type]  # see note above
 
             random_sample = random_sample[: non_interp_mid_mosaic.shape[0]]
             random_sample = random_sample[: non_interp_mid_areas.shape[0]]

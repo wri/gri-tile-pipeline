@@ -1,6 +1,6 @@
 """Shared utilities for loader Lambda workers.
 
-Kept in `loaders/` (rather than `src/`) so Lambda deployments stay
+Kept in `gri_tile_loaders/` (rather than `src/`) so Lambda deployments stay
 self-contained without needing the full `gri_tile_pipeline` package.
 """
 
@@ -15,7 +15,7 @@ import obstore as obs
 from loguru import logger
 
 
-def make_bbox(initial_bbx: list, expansion: int = 10) -> list:
+def make_bbox(initial_bbx: list[float], expansion: int = 10) -> list[float]:
     """Expand a point bbox by *expansion* units of ~300 m (1/360 degree each)."""
     multiplier = 1 / 360
     bbx = initial_bbx.copy()
@@ -26,7 +26,7 @@ def make_bbox(initial_bbx: list, expansion: int = 10) -> list:
     return bbx
 
 
-def obstore_put_hkl(store, relpath: str, obj) -> None:
+def obstore_put_hkl(store: obs.store.ObjectStore, relpath: str, obj: object) -> None:
     """Serialize *obj* with hickle (gzip) and write to *store* at *relpath*."""
     tmp = tempfile.NamedTemporaryFile(suffix=".hkl", delete=False)
     tmp.close()
@@ -47,7 +47,7 @@ def obstore_put_hkl(store, relpath: str, obj) -> None:
             pass
 
 
-def compute_band_stats(arr: np.ndarray) -> dict:
+def compute_band_stats(arr: np.ndarray) -> dict[str, float | int]:
     """Compute summary stats ignoring zeros as nodata.
 
     Returns dict with min, max, mean, std, p5, p50, p95, valid_ratio, count, valid_count.

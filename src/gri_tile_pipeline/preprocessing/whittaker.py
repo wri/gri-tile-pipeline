@@ -34,7 +34,7 @@ class WhittakerSmoother:
         dimy: int = 128,
         outsize: int = 12,
         average: bool = True,
-    ):
+    ) -> None:
         self.lmbd = lmbd
         self.size = size
         self.nbands = nbands

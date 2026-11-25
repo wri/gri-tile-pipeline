@@ -1,7 +1,6 @@
 """Unit tests for preprocessing/whittaker.py."""
 
 import numpy as np
-import pytest
 
 from gri_tile_pipeline.preprocessing.whittaker import WhittakerSmoother
 

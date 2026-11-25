@@ -56,7 +56,7 @@ class TestNormalizeTiming:
         x = rng.uniform(0, 0.5, (5, 172, 172, 17)).astype(np.float32)
 
         start = time.perf_counter()
-        result = normalize_subtile(x)
+        normalize_subtile(x)
         elapsed = time.perf_counter() - start
 
         assert elapsed < 0.5, f"Normalization took {elapsed:.3f}s (target <0.5s)"

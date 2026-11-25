@@ -10,6 +10,8 @@ acquisition count or temporal distribution.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 
@@ -36,7 +38,7 @@ def resample_to_biweekly(
     biweekly_dates = list(range(0, 360, 15))  # 24 target dates
 
     satisfactory_dates = image_dates.copy()
-    selected_images = {}
+    selected_images: dict[int, dict[str, Any]] = {}
 
     for target_day in biweekly_dates:
         distances = np.array([(d - target_day) for d in satisfactory_dates])
